@@ -42,6 +42,7 @@ class DERDataGenerator:
         # Home load config
         base_load_kw: float = 0.5,
         peak_load_kw: float = 8.0,
+        *,
         has_ev: bool = True,
         # Grid config
         off_peak_price: float = 0.08,
@@ -49,7 +50,7 @@ class DERDataGenerator:
         peak_price: float = 0.30,
         # General
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Initialize the DER data generator.
 
@@ -188,10 +189,11 @@ class DataGeneratorRunner:
         """Output data to configured destinations."""
         # Log summary
         logger.info(
-            f"Generated: Solar={data.solar.generation_kw:.2f}kW, "
-            f"Battery={data.battery.soc_percent:.1f}%, "
-            f"Load={data.home_load.total_load_kw:.2f}kW, "
-            f"Grid={data.net_grid_flow_kw:.2f}kW"
+            "Generated: Solar=%.2fkW, Battery=%.1f%%, Load=%.2fkW, Grid=%.2fkW",
+            data.solar.generation_kw,
+            data.battery.soc_percent,
+            data.home_load.total_load_kw,
+            data.net_grid_flow_kw,
         )
 
         # Callback
@@ -203,8 +205,8 @@ class DataGeneratorRunner:
             try:
                 with open(self.output_file, "a") as f:
                     f.write(data.to_json(indent=None) + "\n")
-            except Exception as e:
-                logger.error(f"Failed to write to {self.output_file}: {e}")
+            except OSError:
+                logger.exception("Failed to write to %s", self.output_file)
 
     def run_once(self) -> DERData:
         """Generate and output a single data point."""
@@ -224,6 +226,9 @@ class DataGeneratorRunner:
             interval_seconds: Seconds between data points
             duration_seconds: Optional total duration. None = run forever.
         """
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+
         self._running = True
         start_time = time.time()
 
@@ -263,6 +268,9 @@ class DataGeneratorRunner:
             interval_seconds: Seconds between data points
             align_to_interval: Whether to align to clock intervals
         """
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+
         self._running = True
 
         logger.info(f"Starting scheduled generation every {interval_seconds}s")

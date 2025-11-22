@@ -136,3 +136,15 @@ class TestGeneratorConfig:
         """Test DEFAULT_CONFIG is available."""
         assert DEFAULT_CONFIG is not None
         assert isinstance(DEFAULT_CONFIG, GeneratorConfig)
+
+    def test_from_file_missing_file_raises_error(self):
+        """Test from_file raises FileNotFoundError for missing file."""
+        with pytest.raises(FileNotFoundError, match="does_not_exist.json"):
+            GeneratorConfig.from_file(Path("does_not_exist.json"))
+
+    def test_to_file_unwritable_path_raises_error(self, tmp_path):
+        """Test to_file raises RuntimeError for unwritable path."""
+        config = GeneratorConfig()
+        # Try to write to a directory path (not a file)
+        with pytest.raises(RuntimeError, match="Failed to save configuration"):
+            config.to_file(tmp_path)

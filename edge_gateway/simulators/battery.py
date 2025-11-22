@@ -47,9 +47,15 @@ class BatterySimulator(BaseSimulator):
         """
         if capacity_kwh <= 0:
             raise ValueError("capacity_kwh must be positive")
+        if max_charge_rate_kw <= 0 or max_discharge_rate_kw <= 0:
+            raise ValueError(
+                "max_charge_rate_kw and max_discharge_rate_kw must be positive",
+            )
+        if not (0 < round_trip_efficiency <= 1):
+            raise ValueError("round_trip_efficiency must be in the range (0, 1]")
         if not (0 <= min_soc <= initial_soc <= max_soc <= 100):
             raise ValueError(
-                "SoC bounds must satisfy 0 <= min_soc <= initial_soc <= max_soc <= 100"
+                "SoC bounds must satisfy 0 <= min_soc <= initial_soc <= max_soc <= 100",
             )
 
         super().__init__(seed)

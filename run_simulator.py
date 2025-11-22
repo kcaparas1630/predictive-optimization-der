@@ -279,23 +279,34 @@ def main():
         if not args.start or not args.end:
             parser.error("--historical requires --start and --end dates")
 
-        # Parse dates (YYYY-MM-DD treated as midnight; end date is exclusive)
-        def parse_date(date_str: str, add_day_if_date_only: bool = False) -> datetime:
-            try:
-                return datetime.fromisoformat(date_str)
-            except ValueError:
-                dt = datetime.strptime(date_str, "%Y-%m-%d")
-                if add_day_if_date_only:
-                    dt += timedelta(days=1)
-                return dt
-
-        start = parse_date(args.start, add_day_if_date_only=False)
-        end = parse_date(args.end, add_day_if_date_only=True)
-
         # Historical mode requires minute-aligned intervals; convert and validate
         interval_seconds = args.interval if args.interval is not None else config.interval_seconds
         if interval_seconds < 60 or interval_seconds % 60 != 0:
             parser.error("--interval must be at least 60 seconds and a multiple of 60 for historical mode")
+
+        def parse_date(date_str: str) -> datetime:
+            """Parse a date string in YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] format."""
+            try:
+                return datetime.fromisoformat(date_str)
+            except ValueError:
+                try:
+                    return datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    parser.error(
+                        f"Invalid date format {date_str!r}. Use YYYY-MM-DD or YYYY-MM-DD HH:MM"
+                    )
+                    raise  # pragma: no cover - parser.error exits
+
+        start = parse_date(args.start)
+        end = parse_date(args.end)
+
+        # If end is a date-only string, treat it as exclusive and convert to an
+        # inclusive timestamp for the underlying generator (end of previous interval).
+        if " " not in args.end and "T" not in args.end:
+            end = end - timedelta(seconds=interval_seconds)
+
+        if end < start:
+            parser.error("--end must be after --start for historical mode")
 
         interval_minutes = int(interval_seconds / 60)
         generate_historical(config, start, end, interval_minutes)

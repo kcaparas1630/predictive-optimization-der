@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 import json
 
 
@@ -77,7 +77,7 @@ class GridPriceData:
     price_per_kwh: float  # Current price in $/kWh
     feed_in_tariff: float  # Feed-in tariff for exported energy $/kWh
     demand_charge: float  # Demand charge $/kW
-    time_of_use_period: str  # "peak", "off_peak", "shoulder"
+    time_of_use_period: Literal["peak", "off_peak", "shoulder"]
     carbon_intensity_g_kwh: float  # Grid carbon intensity in gCO2/kWh
 
     def to_dict(self) -> dict:

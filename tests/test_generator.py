@@ -161,3 +161,36 @@ class TestDataGeneratorRunner:
         runner.stop()
 
         assert runner._running is False
+
+    def test_output_data_handles_file_write_error(self, tmp_path, caplog):
+        """Test _output_data logs error but doesn't raise on write failure."""
+        gen = DERDataGenerator(seed=42)
+        # Use a directory path (can't write to it as a file)
+        runner = DataGeneratorRunner(generator=gen, output_file=tmp_path)
+
+        # Should not raise, but should log an error
+        runner.run_once()
+
+        assert "Failed to write to" in caplog.text
+
+    def test_run_continuous_invalid_interval_raises_error(self):
+        """Test run_continuous raises ValueError for invalid interval."""
+        gen = DERDataGenerator(seed=42)
+        runner = DataGeneratorRunner(generator=gen)
+
+        with pytest.raises(ValueError, match="interval_seconds must be positive"):
+            runner.run_continuous(interval_seconds=0)
+
+        with pytest.raises(ValueError, match="interval_seconds must be positive"):
+            runner.run_continuous(interval_seconds=-1)
+
+    def test_run_scheduled_invalid_interval_raises_error(self):
+        """Test run_scheduled raises ValueError for invalid interval."""
+        gen = DERDataGenerator(seed=42)
+        runner = DataGeneratorRunner(generator=gen)
+
+        with pytest.raises(ValueError, match="interval_seconds must be positive"):
+            runner.run_scheduled(interval_seconds=0)
+
+        with pytest.raises(ValueError, match="interval_seconds must be positive"):
+            runner.run_scheduled(interval_seconds=-1)

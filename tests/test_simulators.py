@@ -176,6 +176,31 @@ class TestBatterySimulator:
         with pytest.raises(ValueError, match="SoC bounds must satisfy"):
             BatterySimulator(initial_soc=50, min_soc=-10, max_soc=90)
 
+    def test_invalid_power_rates_raises_error(self):
+        """Test invalid power rates raise ValueError."""
+        with pytest.raises(ValueError, match="max_charge_rate_kw and max_discharge_rate_kw must be positive"):
+            BatterySimulator(max_charge_rate_kw=0)
+
+        with pytest.raises(ValueError, match="max_charge_rate_kw and max_discharge_rate_kw must be positive"):
+            BatterySimulator(max_charge_rate_kw=-1)
+
+        with pytest.raises(ValueError, match="max_charge_rate_kw and max_discharge_rate_kw must be positive"):
+            BatterySimulator(max_discharge_rate_kw=0)
+
+        with pytest.raises(ValueError, match="max_charge_rate_kw and max_discharge_rate_kw must be positive"):
+            BatterySimulator(max_discharge_rate_kw=-1)
+
+    def test_invalid_round_trip_efficiency_raises_error(self):
+        """Test invalid round_trip_efficiency raises ValueError."""
+        with pytest.raises(ValueError, match="round_trip_efficiency must be in the range"):
+            BatterySimulator(round_trip_efficiency=0)
+
+        with pytest.raises(ValueError, match="round_trip_efficiency must be in the range"):
+            BatterySimulator(round_trip_efficiency=-0.5)
+
+        with pytest.raises(ValueError, match="round_trip_efficiency must be in the range"):
+            BatterySimulator(round_trip_efficiency=1.5)
+
 
 class TestHomeLoadSimulator:
     """Tests for HomeLoadSimulator."""
@@ -210,6 +235,21 @@ class TestHomeLoadSimulator:
         for hour in range(24):
             data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
             assert data.total_load_kw <= sim.peak_load_kw
+
+    def test_component_sum_equals_total(self):
+        """Test that sum of components equals total_load_kw."""
+        sim = HomeLoadSimulator(seed=42)
+
+        for hour in range(24):
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            component_sum = (
+                data.hvac_kw
+                + data.appliances_kw
+                + data.lighting_kw
+                + data.ev_charging_kw
+                + data.other_kw
+            )
+            assert abs(data.total_load_kw - component_sum) < 0.0001
 
     def test_evening_peak(self):
         """Test load is higher in evening than during work hours."""

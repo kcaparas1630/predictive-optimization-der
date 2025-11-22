@@ -90,8 +90,10 @@ class GeneratorConfig:
             with open(path) as f:
                 data = json.load(f)
             return cls.from_dict(data)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Configuration file not found: {path}")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Configuration file not found: {path}",
+            ) from exc
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in configuration file {path}: {e}") from e
         except Exception as e:
@@ -106,8 +108,10 @@ class GeneratorConfig:
         try:
             with open(path, "w") as f:
                 json.dump(self.to_dict(), f, indent=2)
-        except Exception as e:
-            raise RuntimeError(f"Failed to save configuration to {path}: {e}") from e
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to save configuration to {path}: {exc}",
+            ) from exc
 
 
 # Default configuration template

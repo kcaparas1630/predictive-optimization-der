@@ -233,11 +233,21 @@ class HomeLoadSimulator(BaseSimulator):
             ev_charging *= scale
             other *= scale
 
+        # Clamp components to non-negative values
+        hvac = max(0, hvac)
+        appliances = max(0, appliances)
+        lighting = max(0, lighting)
+        ev_charging = max(0, ev_charging)
+        other = max(0, other)
+
+        # Recalculate total to ensure sum(components) == total_load_kw
+        total = hvac + appliances + lighting + ev_charging + other
+
         return HomeLoadData(
             total_load_kw=total,
-            hvac_kw=max(0, hvac),
-            appliances_kw=max(0, appliances),
-            lighting_kw=max(0, lighting),
-            ev_charging_kw=max(0, ev_charging),
-            other_kw=max(0, other),
+            hvac_kw=hvac,
+            appliances_kw=appliances,
+            lighting_kw=lighting,
+            ev_charging_kw=ev_charging,
+            other_kw=other,
         )
