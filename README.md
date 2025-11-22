@@ -122,7 +122,7 @@ pytest tests/ -v
 
 ### Project Structure
 
-```
+```text
 edge_gateway/
   __init__.py
   config.py          # Configuration management

@@ -1,5 +1,5 @@
 .env
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -29,4 +29,3 @@ pip-wheel-metadata/
 .vscode/
 .idea/
 .DS_Store
-__pycache__/
