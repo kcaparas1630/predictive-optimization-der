@@ -1,0 +1,6 @@
+# DER Data Simulator Dependencies
+# No external dependencies required - uses only Python standard library
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
