@@ -28,7 +28,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from edge_gateway.config import GeneratorConfig, DEFAULT_CONFIG
@@ -285,17 +285,22 @@ def main():
             parser.error("--interval must be at least 60 seconds and a multiple of 60 for historical mode")
 
         def parse_date(date_str: str) -> datetime:
-            """Parse a date string in YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] format."""
+            """Parse a date string in YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] format (UTC)."""
             try:
-                return datetime.fromisoformat(date_str)
+                dt = datetime.fromisoformat(date_str)
             except ValueError:
                 try:
-                    return datetime.strptime(date_str, "%Y-%m-%d")
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
                 except ValueError:
                     parser.error(
                         f"Invalid date format {date_str!r}. Use YYYY-MM-DD or YYYY-MM-DD HH:MM"
                     )
                     raise  # pragma: no cover - parser.error exits
+
+            # Normalize to UTC-aware; treat all historical timestamps as UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
 
         start = parse_date(args.start)
         end = parse_date(args.end)

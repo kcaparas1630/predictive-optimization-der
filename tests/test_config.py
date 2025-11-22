@@ -148,3 +148,20 @@ class TestGeneratorConfig:
         # Try to write to a directory path (not a file)
         with pytest.raises(RuntimeError, match="Failed to save configuration"):
             config.to_file(tmp_path)
+
+    def test_from_file_invalid_json_raises_error(self, tmp_path):
+        """Test from_file raises ValueError for invalid JSON."""
+        invalid_json = tmp_path / "invalid.json"
+        invalid_json.write_text("{ invalid json content }")
+
+        with pytest.raises(ValueError, match="Invalid JSON in configuration file"):
+            GeneratorConfig.from_file(invalid_json)
+
+    def test_from_file_invalid_config_structure_raises_error(self, tmp_path):
+        """Test from_file raises RuntimeError for invalid config structure."""
+        invalid_config = tmp_path / "bad_config.json"
+        # Config with unexpected keys in solar section
+        invalid_config.write_text('{"solar": {"unknown_key": 123}}')
+
+        with pytest.raises(RuntimeError, match="Failed to load configuration"):
+            GeneratorConfig.from_file(invalid_config)

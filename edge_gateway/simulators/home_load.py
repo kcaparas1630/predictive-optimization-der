@@ -181,8 +181,8 @@ class HomeLoadSimulator(BaseSimulator):
         hour = timestamp.hour
 
         # Deterministic daily pattern based on timestamp only
-        # Use day ordinal + base seed for reproducible but varying daily patterns
-        day_seed = timestamp.date().toordinal() + self._base_seed
+        # Use day ordinal + hour + base seed for reproducible but varying patterns
+        day_seed = timestamp.date().toordinal() + self._base_seed + hour
         day_random = random.Random(day_seed)
 
         # 70% chance EV needs charge on any given day
@@ -196,9 +196,8 @@ class HomeLoadSimulator(BaseSimulator):
             return self.ev_charging_kw
         # Or charge when arriving home (evening)
         elif 18 <= hour < 22:
-            # Use hour-specific seed for deterministic evening charging decision
-            hour_random = random.Random(day_seed + hour)
-            if hour_random.random() < 0.3:
+            # Use an additional deterministic draw for evening decision
+            if day_random.random() < 0.3:
                 return self.ev_charging_kw
 
         return 0.0

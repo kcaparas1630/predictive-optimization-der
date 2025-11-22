@@ -1,6 +1,6 @@
 """Tests for DER simulators."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -23,7 +23,7 @@ class TestSolarSimulator:
     def test_generate_returns_solar_data(self):
         """Test generate returns SolarData."""
         sim = SolarSimulator(seed=42)
-        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert hasattr(data, "generation_kw")
         assert hasattr(data, "irradiance_w_m2")
@@ -34,7 +34,7 @@ class TestSolarSimulator:
         """Test no solar generation at night."""
         sim = SolarSimulator(seed=42)
         # Midnight
-        data = sim.generate(datetime(2024, 6, 15, 0, 0, 0))
+        data = sim.generate(datetime(2024, 6, 15, 0, 0, 0, tzinfo=timezone.utc))
         assert data.generation_kw == 0
         assert data.irradiance_w_m2 == 0
 
@@ -42,7 +42,7 @@ class TestSolarSimulator:
         """Test peak generation around midday."""
         sim = SolarSimulator(panel_capacity_kw=10.0, seed=42)
         # Noon in summer
-        data = sim.generate(datetime(2024, 6, 21, 12, 0, 0))
+        data = sim.generate(datetime(2024, 6, 21, 12, 0, 0, tzinfo=timezone.utc))
         assert data.generation_kw > 0
         assert data.irradiance_w_m2 > 500
 
@@ -51,7 +51,7 @@ class TestSolarSimulator:
         sim = SolarSimulator(panel_capacity_kw=10.0, seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             assert data.generation_kw <= sim.panel_capacity_kw
             assert data.generation_kw >= 0
 
@@ -60,7 +60,7 @@ class TestSolarSimulator:
         sim1 = SolarSimulator(seed=42)
         sim2 = SolarSimulator(seed=42)
 
-        ts = datetime(2024, 6, 15, 12, 0, 0)
+        ts = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         data1 = sim1.generate(ts)
         data2 = sim2.generate(ts)
 
@@ -71,12 +71,12 @@ class TestSolarSimulator:
         sim = SolarSimulator(seed=42)
 
         # Summer noon
-        summer = sim.generate(datetime(2024, 6, 21, 12, 0, 0))
+        summer = sim.generate(datetime(2024, 6, 21, 12, 0, 0, tzinfo=timezone.utc))
 
         # Reset for fair comparison
         sim2 = SolarSimulator(seed=42)
         # Winter noon
-        winter = sim2.generate(datetime(2024, 12, 21, 12, 0, 0))
+        winter = sim2.generate(datetime(2024, 12, 21, 12, 0, 0, tzinfo=timezone.utc))
 
         # Summer should have more generation (at same latitude)
         assert summer.generation_kw >= winter.generation_kw * 0.8
@@ -101,7 +101,7 @@ class TestBatterySimulator:
     def test_generate_returns_battery_data(self):
         """Test generate returns BatteryData."""
         sim = BatterySimulator(seed=42)
-        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert hasattr(data, "soc_percent")
         assert hasattr(data, "capacity_kwh")
@@ -118,7 +118,7 @@ class TestBatterySimulator:
 
         for hour in range(24):
             data = sim.generate(
-                datetime(2024, 6, 15, hour, 0, 0),
+                datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc),
                 solar_generation_kw=5.0,
                 home_load_kw=3.0,
             )
@@ -131,7 +131,7 @@ class TestBatterySimulator:
 
         # Excess solar
         data = sim.generate(
-            datetime(2024, 6, 15, 12, 0, 0),
+            datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc),
             solar_generation_kw=8.0,
             home_load_kw=2.0,
             grid_price=0.15,
@@ -145,8 +145,8 @@ class TestBatterySimulator:
         sim1 = BatterySimulator(initial_cycles=100, seed=42)
         sim2 = BatterySimulator(initial_cycles=2000, seed=42)
 
-        data1 = sim1.generate(datetime(2024, 6, 15, 12, 0, 0))
-        data2 = sim2.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data1 = sim1.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
+        data2 = sim2.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert data1.health_percent > data2.health_percent
 
@@ -213,7 +213,7 @@ class TestHomeLoadSimulator:
     def test_generate_returns_home_load_data(self):
         """Test generate returns HomeLoadData."""
         sim = HomeLoadSimulator(seed=42)
-        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert hasattr(data, "total_load_kw")
         assert hasattr(data, "hvac_kw")
@@ -225,7 +225,7 @@ class TestHomeLoadSimulator:
         sim = HomeLoadSimulator(base_load_kw=0.5, seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             assert data.total_load_kw >= sim.base_load_kw
 
     def test_load_bounded_by_peak(self):
@@ -233,7 +233,7 @@ class TestHomeLoadSimulator:
         sim = HomeLoadSimulator(peak_load_kw=10.0, seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             assert data.total_load_kw <= sim.peak_load_kw
 
     def test_component_sum_equals_total(self):
@@ -241,7 +241,7 @@ class TestHomeLoadSimulator:
         sim = HomeLoadSimulator(seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             component_sum = (
                 data.hvac_kw
                 + data.appliances_kw
@@ -256,12 +256,12 @@ class TestHomeLoadSimulator:
         sim = HomeLoadSimulator(seed=42)
 
         # Weekday work hours
-        work_hours = sim.generate(datetime(2024, 6, 17, 14, 0, 0))  # Monday 2 PM
+        work_hours = sim.generate(datetime(2024, 6, 17, 14, 0, 0, tzinfo=timezone.utc))  # Monday 2 PM
 
         # Reset
         sim2 = HomeLoadSimulator(seed=42)
         # Weekday evening
-        evening = sim2.generate(datetime(2024, 6, 17, 19, 0, 0))  # Monday 7 PM
+        evening = sim2.generate(datetime(2024, 6, 17, 19, 0, 0, tzinfo=timezone.utc))  # Monday 7 PM
 
         # Evening should typically have higher load
         # (Note: due to randomness, we check the general pattern)
@@ -272,8 +272,29 @@ class TestHomeLoadSimulator:
         sim = HomeLoadSimulator(has_ev=False, seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             assert data.ev_charging_kw == 0
+
+    def test_ev_charging_deterministic(self):
+        """Test EV charging is deterministic for same timestamp and seed."""
+        sim1 = HomeLoadSimulator(has_ev=True, seed=42)
+        sim2 = HomeLoadSimulator(has_ev=True, seed=42)
+
+        ts = datetime(2024, 6, 15, 23, 0, 0, tzinfo=timezone.utc)  # Overnight charging hour
+        data1 = sim1.generate(ts)
+        data2 = sim2.generate(ts)
+
+        assert data1.ev_charging_kw == data2.ev_charging_kw
+
+        # Also test evening hour
+        ts_evening = datetime(2024, 6, 15, 19, 0, 0, tzinfo=timezone.utc)
+        sim3 = HomeLoadSimulator(has_ev=True, seed=42)
+        sim4 = HomeLoadSimulator(has_ev=True, seed=42)
+
+        data3 = sim3.generate(ts_evening)
+        data4 = sim4.generate(ts_evening)
+
+        assert data3.ev_charging_kw == data4.ev_charging_kw
 
 
 class TestGridPriceSimulator:
@@ -287,7 +308,7 @@ class TestGridPriceSimulator:
     def test_generate_returns_grid_price_data(self):
         """Test generate returns GridPriceData."""
         sim = GridPriceSimulator(seed=42)
-        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = sim.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert hasattr(data, "price_per_kwh")
         assert hasattr(data, "feed_in_tariff")
@@ -298,13 +319,13 @@ class TestGridPriceSimulator:
         sim = GridPriceSimulator(seed=42)
 
         # Early morning - should be off_peak
-        data = sim.generate(datetime(2024, 6, 17, 3, 0, 0))  # Monday 3 AM
+        data = sim.generate(datetime(2024, 6, 17, 3, 0, 0, tzinfo=timezone.utc))  # Monday 3 AM
         assert data.time_of_use_period == "off_peak"
 
         # Reset for fresh state
         sim2 = GridPriceSimulator(seed=42)
         # Afternoon - should be peak
-        data2 = sim2.generate(datetime(2024, 6, 17, 16, 0, 0))  # Monday 4 PM
+        data2 = sim2.generate(datetime(2024, 6, 17, 16, 0, 0, tzinfo=timezone.utc))  # Monday 4 PM
         assert data2.time_of_use_period == "peak"
 
     def test_peak_price_higher_than_off_peak(self):
@@ -315,14 +336,14 @@ class TestGridPriceSimulator:
             seed=42,
         )
 
-        off_peak = sim.generate(datetime(2024, 6, 17, 3, 0, 0))
+        off_peak = sim.generate(datetime(2024, 6, 17, 3, 0, 0, tzinfo=timezone.utc))
 
         sim2 = GridPriceSimulator(
             off_peak_price=0.08,
             peak_price=0.30,
             seed=42,
         )
-        peak = sim2.generate(datetime(2024, 6, 17, 16, 0, 0))
+        peak = sim2.generate(datetime(2024, 6, 17, 16, 0, 0, tzinfo=timezone.utc))
 
         assert peak.price_per_kwh > off_peak.price_per_kwh
 
@@ -331,7 +352,7 @@ class TestGridPriceSimulator:
         sim = GridPriceSimulator(seed=42)
 
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             assert data.feed_in_tariff <= data.price_per_kwh
 
     def test_carbon_intensity_varies(self):
@@ -340,7 +361,7 @@ class TestGridPriceSimulator:
 
         intensities = []
         for hour in range(24):
-            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0))
+            data = sim.generate(datetime(2024, 6, 15, hour, 0, 0, tzinfo=timezone.utc))
             intensities.append(data.carbon_intensity_g_kwh)
 
         # Should have some variation

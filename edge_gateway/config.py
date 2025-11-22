@@ -94,10 +94,13 @@ class GeneratorConfig:
             raise FileNotFoundError(
                 f"Configuration file not found: {path}",
             ) from exc
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in configuration file {path}: {e}") from e
-        except Exception as e:
-            raise RuntimeError(f"Failed to load configuration from {path}: {e}") from e
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in configuration file {path}: {exc}") from exc
+        except (OSError, ValueError) as exc:
+            # OSError: read problems; ValueError: invalid configuration structure
+            raise RuntimeError(
+                f"Failed to load configuration from {path}: {exc}",
+            ) from exc
 
     def to_dict(self) -> dict:
         """Convert config to dictionary."""

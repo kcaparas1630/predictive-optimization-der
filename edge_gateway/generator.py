@@ -7,9 +7,10 @@ Supports continuous generation and scheduled execution.
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from edge_gateway.models import DERData
 from edge_gateway.simulators import (
@@ -171,7 +172,7 @@ class DataGeneratorRunner:
         generator: DERDataGenerator,
         output_callback: Optional[Callable[[DERData], None]] = None,
         output_file: Optional[Path] = None,
-    ):
+    ) -> None:
         """
         Initialize the runner.
 
@@ -232,7 +233,10 @@ class DataGeneratorRunner:
         self._running = True
         start_time = time.time()
 
-        logger.info(f"Starting continuous generation every {interval_seconds}s")
+        logger.info(
+            "Starting continuous generation every %ss",
+            interval_seconds,
+        )
 
         try:
             while self._running:
@@ -273,7 +277,10 @@ class DataGeneratorRunner:
 
         self._running = True
 
-        logger.info(f"Starting scheduled generation every {interval_seconds}s")
+        logger.info(
+            "Starting scheduled generation every %ss",
+            interval_seconds,
+        )
 
         try:
             while self._running:
