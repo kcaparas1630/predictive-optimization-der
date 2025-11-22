@@ -1,6 +1,7 @@
 """Home load simulator with realistic daily consumption patterns."""
 
 import math
+import random
 from datetime import datetime
 from typing import Optional
 
@@ -25,11 +26,12 @@ class HomeLoadSimulator(BaseSimulator):
         self,
         base_load_kw: float = 0.5,  # Always-on load (fridge, standby, etc.)
         peak_load_kw: float = 8.0,  # Maximum expected load
+        *,
         has_ev: bool = True,
         ev_charging_kw: float = 7.2,  # Level 2 charger
         hvac_capacity_kw: float = 3.5,
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Initialize home load simulator.
 
@@ -48,9 +50,8 @@ class HomeLoadSimulator(BaseSimulator):
         self.ev_charging_kw = ev_charging_kw
         self.hvac_capacity_kw = hvac_capacity_kw
 
-        # EV charging state
-        self._ev_needs_charge = True
-        self._ev_current_charge = 0.0  # kWh charged today
+        # Store base seed for deterministic day-based calculations
+        self._base_seed = seed if seed is not None else self._random.randint(0, 1000000)
 
     def _is_weekend(self, timestamp: datetime) -> bool:
         """Check if timestamp is on a weekend."""
@@ -82,7 +83,6 @@ class HomeLoadSimulator(BaseSimulator):
             else:
                 return 0.3
 
-        return 0.3
 
     def _calculate_hvac_load(self, timestamp: datetime) -> float:
         """
@@ -166,34 +166,40 @@ class HomeLoadSimulator(BaseSimulator):
         """
         Calculate EV charging load.
 
-        EV typically charges overnight or when arriving home.
+        Uses deterministic daily pattern based on timestamp only,
+        making it safe for out-of-order or concurrent calls.
+
+        Args:
+            timestamp: Current timestamp
+
+        Returns:
+            EV charging power in kW (0 if not charging)
         """
         if not self.has_ev:
             return 0.0
 
         hour = timestamp.hour
 
-        # Reset charge need in the morning (simulating daily driving)
-        if hour == 7:
-            self._ev_needs_charge = self._random.random() < 0.7  # 70% chance needs charge
-            self._ev_current_charge = 0.0
+        # Deterministic daily pattern based on timestamp only
+        # Use day ordinal + base seed for reproducible but varying daily patterns
+        day_seed = timestamp.date().toordinal() + self._base_seed
+        day_random = random.Random(day_seed)
 
-        # EV charging patterns
-        if self._ev_needs_charge:
-            # Prefer overnight charging (cheap electricity)
-            if 22 <= hour or hour < 6:
-                charge_probability = 0.9
-            # Or charge when arriving home
-            elif 18 <= hour < 22:
-                charge_probability = 0.3
-            else:
-                charge_probability = 0.05
+        # 70% chance EV needs charge on any given day
+        needs_charge = day_random.random() < 0.7
 
-            if self._random.random() < charge_probability:
-                # Check if EV is full (assume 60 kWh battery, charge 80%)
-                if self._ev_current_charge < 48:
-                    self._ev_current_charge += self.ev_charging_kw / 12  # 5-min intervals
-                    return self.ev_charging_kw
+        if not needs_charge:
+            return 0.0
+
+        # Prefer overnight charging (cheap electricity)
+        if 22 <= hour or hour < 6:
+            return self.ev_charging_kw
+        # Or charge when arriving home (evening)
+        elif 18 <= hour < 22:
+            # Use hour-specific seed for deterministic evening charging decision
+            hour_random = random.Random(day_seed + hour)
+            if hour_random.random() < 0.3:
+                return self.ev_charging_kw
 
         return 0.0
 
@@ -215,8 +221,17 @@ class HomeLoadSimulator(BaseSimulator):
         ev_charging = self._calculate_ev_charging(timestamp)
         other = self.base_load_kw + self._random.uniform(-0.1, 0.2)
 
-        total = hvac + appliances + lighting + ev_charging + other
-        total = self._clamp(total, self.base_load_kw, self.peak_load_kw)
+        unclamped_total = hvac + appliances + lighting + ev_charging + other
+        total = self._clamp(unclamped_total, self.base_load_kw, self.peak_load_kw)
+
+        # Scale components proportionally if clamped
+        if unclamped_total > 0 and total != unclamped_total:
+            scale = total / unclamped_total
+            hvac *= scale
+            appliances *= scale
+            lighting *= scale
+            ev_charging *= scale
+            other *= scale
 
         return HomeLoadData(
             total_load_kw=total,

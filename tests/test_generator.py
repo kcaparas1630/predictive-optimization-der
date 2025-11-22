@@ -1,6 +1,6 @@
 """Tests for the DER data generator."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -29,7 +29,7 @@ class TestDERDataGenerator:
     def test_generate_returns_der_data(self):
         """Test generate returns DERData."""
         gen = DERDataGenerator(seed=42)
-        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         assert isinstance(data, DERData)
         assert data.device_id == "edge-gateway-001"
@@ -41,9 +41,9 @@ class TestDERDataGenerator:
     def test_generate_uses_current_time_by_default(self):
         """Test generate uses current time when no timestamp provided."""
         gen = DERDataGenerator(seed=42)
-        before = datetime.now()
+        before = datetime.now(timezone.utc)
         data = gen.generate()
-        after = datetime.now()
+        after = datetime.now(timezone.utc)
 
         assert before <= data.timestamp <= after
 
@@ -51,8 +51,8 @@ class TestDERDataGenerator:
         """Test generating historical data."""
         gen = DERDataGenerator(seed=42)
 
-        start = datetime(2024, 6, 15, 0, 0, 0)
-        end = datetime(2024, 6, 15, 1, 0, 0)
+        start = datetime(2024, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2024, 6, 15, 1, 0, 0, tzinfo=timezone.utc)
 
         data = gen.generate_historical(start, end, interval_minutes=5)
 
@@ -71,8 +71,8 @@ class TestDERDataGenerator:
         """Test generating a full day of historical data."""
         gen = DERDataGenerator(seed=42)
 
-        start = datetime(2024, 6, 15, 0, 0, 0)
-        end = datetime(2024, 6, 15, 23, 55, 0)
+        start = datetime(2024, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2024, 6, 15, 23, 55, 0, tzinfo=timezone.utc)
 
         data = gen.generate_historical(start, end, interval_minutes=5)
 
@@ -84,7 +84,7 @@ class TestDERDataGenerator:
         gen1 = DERDataGenerator(seed=42)
         gen2 = DERDataGenerator(seed=42)
 
-        ts = datetime(2024, 6, 15, 12, 0, 0)
+        ts = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         data1 = gen1.generate(ts)
         data2 = gen2.generate(ts)
 
@@ -94,7 +94,7 @@ class TestDERDataGenerator:
     def test_net_grid_flow_calculation(self):
         """Test net grid flow is calculated correctly."""
         gen = DERDataGenerator(seed=42)
-        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         expected_net = (
             data.home_load.total_load_kw
@@ -107,7 +107,7 @@ class TestDERDataGenerator:
     def test_data_serialization(self):
         """Test generated data can be serialized to JSON."""
         gen = DERDataGenerator(seed=42)
-        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0))
+        data = gen.generate(datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
 
         json_str = data.to_json()
         assert isinstance(json_str, str)
@@ -129,7 +129,7 @@ class TestDataGeneratorRunner:
         gen = DERDataGenerator(seed=42)
         captured_data = []
 
-        def capture(data):
+        def capture(data) -> None:
             captured_data.append(data)
 
         runner = DataGeneratorRunner(generator=gen, output_callback=capture)

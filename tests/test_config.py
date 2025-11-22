@@ -1,7 +1,6 @@
 """Tests for configuration management."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -112,34 +111,26 @@ class TestGeneratorConfig:
         assert config.solar.capacity_kw == 10.0
         assert config.battery.capacity_kwh == 13.5
 
-    def test_to_file_and_from_file(self):
+    def test_to_file_and_from_file(self, tmp_path):
         """Test config can be saved and loaded from file."""
         config = GeneratorConfig(
             device_id="file-test-device",
             seed=42,
         )
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
-            temp_path = Path(f.name)
+        config_path = tmp_path / "config.json"
+        config.to_file(config_path)
 
-        try:
-            config.to_file(temp_path)
+        # File should exist and be valid JSON
+        assert config_path.exists()
+        with open(config_path) as f:
+            data = json.load(f)
+        assert data["device_id"] == "file-test-device"
 
-            # File should exist and be valid JSON
-            assert temp_path.exists()
-            with open(temp_path) as f:
-                data = json.load(f)
-            assert data["device_id"] == "file-test-device"
-
-            # Should be able to load it back
-            loaded = GeneratorConfig.from_file(temp_path)
-            assert loaded.device_id == "file-test-device"
-            assert loaded.seed == 42
-
-        finally:
-            temp_path.unlink()
+        # Should be able to load it back
+        loaded = GeneratorConfig.from_file(config_path)
+        assert loaded.device_id == "file-test-device"
+        assert loaded.seed == 42
 
     def test_default_config_exists(self):
         """Test DEFAULT_CONFIG is available."""

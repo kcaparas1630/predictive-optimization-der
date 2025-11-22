@@ -44,30 +44,43 @@ python run_simulator.py --generate-config --config config.json
 
 ### Configuration
 
-Create a `config.json` file to customize the simulator:
+Create a `config.json` file to customize the simulator. All fields are optional and will use sensible defaults if omitted:
 
 ```json
 {
   "device_id": "edge-gateway-001",
   "interval_seconds": 300,
-  "seed": 42,
+  "output_file": null,
+  "seed": null,
   "solar": {
     "capacity_kw": 10.0,
-    "latitude": 37.7749
+    "latitude": 37.7749,
+    "panel_efficiency": 0.20,
+    "temp_coefficient": -0.004
   },
   "battery": {
     "capacity_kwh": 13.5,
-    "max_charge_rate_kw": 5.0
+    "max_charge_rate_kw": 5.0,
+    "max_discharge_rate_kw": 5.0,
+    "round_trip_efficiency": 0.90,
+    "initial_soc": 50.0,
+    "min_soc": 10.0,
+    "max_soc": 90.0
   },
   "home_load": {
     "base_load_kw": 0.5,
     "peak_load_kw": 8.0,
-    "has_ev": true
+    "has_ev": true,
+    "ev_charging_kw": 7.2,
+    "hvac_capacity_kw": 3.5
   },
   "grid_price": {
     "off_peak_price": 0.08,
     "shoulder_price": 0.15,
-    "peak_price": 0.30
+    "peak_price": 0.30,
+    "base_feed_in_tariff": 0.05,
+    "demand_charge": 10.0,
+    "volatility": 0.15
   }
 }
 ```
@@ -138,9 +151,11 @@ edge_gateway/
     home_load.py     # Home load simulator
     grid_price.py    # Grid price simulator
 tests/
+  __init__.py
   test_config.py
   test_generator.py
   test_models.py
   test_simulators.py
 run_simulator.py     # CLI entry point
+pyproject.toml       # Project configuration
 ```

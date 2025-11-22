@@ -1,7 +1,7 @@
 """Tests for DER data models."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -147,7 +147,7 @@ class TestDERData:
     def create_sample_der_data(self):
         """Create sample DER data for testing."""
         return DERData(
-            timestamp=datetime(2024, 6, 15, 14, 30, 0),
+            timestamp=datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc),
             device_id="test-gateway-001",
             solar=SolarData(
                 generation_kw=7.5,

@@ -7,7 +7,7 @@ Supports continuous generation and scheduled execution.
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -108,7 +108,7 @@ class DERDataGenerator:
             DERData containing all simulated values
         """
         if timestamp is None:
-            timestamp = datetime.now()
+            timestamp = datetime.now(timezone.utc)
 
         # Generate base data
         solar_data = self.solar.generate(timestamp)
@@ -200,8 +200,11 @@ class DataGeneratorRunner:
 
         # File output
         if self.output_file:
-            with open(self.output_file, "a") as f:
-                f.write(data.to_json(indent=None) + "\n")
+            try:
+                with open(self.output_file, "a") as f:
+                    f.write(data.to_json(indent=None) + "\n")
+            except Exception as e:
+                logger.error(f"Failed to write to {self.output_file}: {e}")
 
     def run_once(self) -> DERData:
         """Generate and output a single data point."""
@@ -231,7 +234,7 @@ class DataGeneratorRunner:
                 self.run_once()
 
                 # Check duration
-                if duration_seconds:
+                if duration_seconds is not None:
                     elapsed = time.time() - start_time
                     if elapsed >= duration_seconds:
                         logger.info("Duration reached, stopping")

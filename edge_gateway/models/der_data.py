@@ -102,7 +102,7 @@ class DERData:
     grid_price: GridPriceData
     net_grid_flow_kw: float = field(init=False)  # Positive = importing, negative = exporting
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Calculate net grid flow after initialization."""
         self.net_grid_flow_kw = (
             self.home_load.total_load_kw

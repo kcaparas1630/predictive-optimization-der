@@ -27,7 +27,7 @@ class SolarSimulator(BaseSimulator):
         panel_efficiency: float = 0.20,  # 20% base efficiency
         temp_coefficient: float = -0.004,  # -0.4% per degree C above 25
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Initialize solar simulator.
 
@@ -38,6 +38,9 @@ class SolarSimulator(BaseSimulator):
             temp_coefficient: Temperature coefficient (efficiency change per degree C)
             seed: Random seed for reproducibility
         """
+        if panel_efficiency <= 0:
+            raise ValueError("panel_efficiency must be greater than 0")
+
         super().__init__(seed)
         self.panel_capacity_kw = panel_capacity_kw
         self.latitude = latitude

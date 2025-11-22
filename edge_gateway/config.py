@@ -1,7 +1,7 @@
 """Configuration management for the DER data generator."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -69,67 +69,45 @@ class GeneratorConfig:
     @classmethod
     def from_dict(cls, data: dict) -> "GeneratorConfig":
         """Create config from dictionary."""
-        return cls(
-            device_id=data.get("device_id", "edge-gateway-001"),
-            interval_seconds=data.get("interval_seconds", 300),
-            output_file=data.get("output_file"),
-            seed=data.get("seed"),
-            solar=SolarConfig(**data.get("solar", {})),
-            battery=BatteryConfig(**data.get("battery", {})),
-            home_load=HomeLoadConfig(**data.get("home_load", {})),
-            grid_price=GridPriceConfig(**data.get("grid_price", {})),
-        )
+        try:
+            return cls(
+                device_id=data.get("device_id", "edge-gateway-001"),
+                interval_seconds=data.get("interval_seconds", 300),
+                output_file=data.get("output_file"),
+                seed=data.get("seed"),
+                solar=SolarConfig(**data.get("solar", {})),
+                battery=BatteryConfig(**data.get("battery", {})),
+                home_load=HomeLoadConfig(**data.get("home_load", {})),
+                grid_price=GridPriceConfig(**data.get("grid_price", {})),
+            )
+        except TypeError as e:
+            raise ValueError(f"Invalid configuration format: {e}") from e
 
     @classmethod
     def from_file(cls, path: Path) -> "GeneratorConfig":
         """Load config from JSON file."""
-        with open(path) as f:
-            data = json.load(f)
-        return cls.from_dict(data)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return cls.from_dict(data)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Configuration file not found: {path}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file {path}: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to load configuration from {path}: {e}") from e
 
     def to_dict(self) -> dict:
         """Convert config to dictionary."""
-        return {
-            "device_id": self.device_id,
-            "interval_seconds": self.interval_seconds,
-            "output_file": self.output_file,
-            "seed": self.seed,
-            "solar": {
-                "capacity_kw": self.solar.capacity_kw,
-                "latitude": self.solar.latitude,
-                "panel_efficiency": self.solar.panel_efficiency,
-                "temp_coefficient": self.solar.temp_coefficient,
-            },
-            "battery": {
-                "capacity_kwh": self.battery.capacity_kwh,
-                "max_charge_rate_kw": self.battery.max_charge_rate_kw,
-                "max_discharge_rate_kw": self.battery.max_discharge_rate_kw,
-                "round_trip_efficiency": self.battery.round_trip_efficiency,
-                "initial_soc": self.battery.initial_soc,
-                "min_soc": self.battery.min_soc,
-                "max_soc": self.battery.max_soc,
-            },
-            "home_load": {
-                "base_load_kw": self.home_load.base_load_kw,
-                "peak_load_kw": self.home_load.peak_load_kw,
-                "has_ev": self.home_load.has_ev,
-                "ev_charging_kw": self.home_load.ev_charging_kw,
-                "hvac_capacity_kw": self.home_load.hvac_capacity_kw,
-            },
-            "grid_price": {
-                "off_peak_price": self.grid_price.off_peak_price,
-                "shoulder_price": self.grid_price.shoulder_price,
-                "peak_price": self.grid_price.peak_price,
-                "base_feed_in_tariff": self.grid_price.base_feed_in_tariff,
-                "demand_charge": self.grid_price.demand_charge,
-                "volatility": self.grid_price.volatility,
-            },
-        }
+        return asdict(self)
 
     def to_file(self, path: Path) -> None:
         """Save config to JSON file."""
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        try:
+            with open(path, "w") as f:
+                json.dump(self.to_dict(), f, indent=2)
+        except Exception as e:
+            raise RuntimeError(f"Failed to save configuration to {path}: {e}") from e
 
 
 # Default configuration template

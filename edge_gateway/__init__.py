@@ -8,4 +8,5 @@ This package provides realistic simulation of:
 - Grid price signals
 """
 
+__all__ = ["__version__"]
 __version__ = "0.1.0"

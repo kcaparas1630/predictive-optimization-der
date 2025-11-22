@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 DER Data Simulator - Command Line Interface
 
@@ -122,7 +121,7 @@ def generate_historical(
     generator = create_generator_from_config(config)
     data = generator.generate_historical(start, end, interval_minutes)
 
-    logger.info(f"Generated {len(data)} data points from {start} to {end}")
+    logger.info("Generated %d data points from %s to %s", len(data), start, end)
 
     # Output to file or stdout
     if config.output_file:
@@ -130,7 +129,7 @@ def generate_historical(
         with open(output_path, "w") as f:
             for d in data:
                 f.write(d.to_json(indent=None) + "\n")
-        logger.info(f"Data written to {output_path}")
+        logger.info("Data written to %s", output_path)
     else:
         for d in data:
             print(d.to_json())
@@ -139,7 +138,7 @@ def generate_historical(
 def generate_sample_config(output_path: Path) -> None:
     """Generate a sample configuration file."""
     DEFAULT_CONFIG.to_file(output_path)
-    logger.info(f"Sample config written to {output_path}")
+    logger.info("Sample config written to %s", output_path)
 
 
 def main():
@@ -186,7 +185,7 @@ def main():
     parser.add_argument(
         "--interval",
         type=float,
-        default=300,
+        default=None,
         help="Interval in seconds between data points (default: 300)",
     )
     parser.add_argument(
@@ -202,8 +201,8 @@ def main():
     parser.add_argument(
         "--device-id",
         type=str,
-        default="edge-gateway-001",
-        help="Device ID for the edge gateway",
+        default=None,
+        help="Device ID for the edge gateway (default: edge-gateway-001)",
     )
     parser.add_argument(
         "--seed",
@@ -215,12 +214,12 @@ def main():
     parser.add_argument(
         "--start",
         type=str,
-        help="Start date for historical data (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
+        help="Start date for historical data (YYYY-MM-DD starts at midnight, or YYYY-MM-DD HH:MM)",
     )
     parser.add_argument(
         "--end",
         type=str,
-        help="End date for historical data (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
+        help="End date for historical data (YYYY-MM-DD is exclusive/ends at midnight, or YYYY-MM-DD HH:MM for exact time)",
     )
 
     # Verbosity
@@ -244,18 +243,20 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Load or create configuration
-    if args.config and args.config.exists():
+    if args.config:
+        if not args.config.exists():
+            parser.error(f"Configuration file not found: {args.config}")
         config = GeneratorConfig.from_file(args.config)
-        logger.info(f"Loaded config from {args.config}")
+        logger.info("Loaded config from %s", args.config)
     else:
         config = GeneratorConfig()
 
-    # Apply command line overrides
-    if args.interval:
+    # Apply command line overrides (only if explicitly provided)
+    if args.interval is not None:
         config.interval_seconds = args.interval
-    if args.output:
+    if args.output is not None:
         config.output_file = str(args.output)
-    if args.device_id:
+    if args.device_id is not None:
         config.device_id = args.device_id
     if args.seed is not None:
         config.seed = args.seed
@@ -278,18 +279,26 @@ def main():
         if not args.start or not args.end:
             parser.error("--historical requires --start and --end dates")
 
-        # Parse dates
-        try:
-            start = datetime.fromisoformat(args.start)
-        except ValueError:
-            start = datetime.strptime(args.start, "%Y-%m-%d")
+        # Parse dates (YYYY-MM-DD treated as midnight; end date is exclusive)
+        def parse_date(date_str: str, add_day_if_date_only: bool = False) -> datetime:
+            try:
+                return datetime.fromisoformat(date_str)
+            except ValueError:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                if add_day_if_date_only:
+                    dt += timedelta(days=1)
+                return dt
 
-        try:
-            end = datetime.fromisoformat(args.end)
-        except ValueError:
-            end = datetime.strptime(args.end, "%Y-%m-%d") + timedelta(days=1)
+        start = parse_date(args.start, add_day_if_date_only=False)
+        end = parse_date(args.end, add_day_if_date_only=True)
 
-        generate_historical(config, start, end, int(args.interval / 60))
+        # Historical mode requires minute-aligned intervals; convert and validate
+        interval_seconds = args.interval if args.interval is not None else config.interval_seconds
+        if interval_seconds < 60 or interval_seconds % 60 != 0:
+            parser.error("--interval must be at least 60 seconds and a multiple of 60 for historical mode")
+
+        interval_minutes = int(interval_seconds / 60)
+        generate_historical(config, start, end, interval_minutes)
 
 
 if __name__ == "__main__":

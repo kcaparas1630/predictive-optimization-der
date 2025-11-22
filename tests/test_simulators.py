@@ -64,7 +64,7 @@ class TestSolarSimulator:
         data1 = sim1.generate(ts)
         data2 = sim2.generate(ts)
 
-        assert data1.generation_kw == data2.generation_kw
+        assert data1 == data2
 
     def test_seasonal_variation(self):
         """Test summer has more generation than winter."""
@@ -80,6 +80,14 @@ class TestSolarSimulator:
 
         # Summer should have more generation (at same latitude)
         assert summer.generation_kw >= winter.generation_kw * 0.8
+
+    def test_invalid_panel_efficiency_raises_error(self):
+        """Test invalid panel efficiency raises ValueError."""
+        with pytest.raises(ValueError, match="panel_efficiency must be greater than 0"):
+            SolarSimulator(panel_efficiency=0.0)
+
+        with pytest.raises(ValueError, match="panel_efficiency must be greater than 0"):
+            SolarSimulator(panel_efficiency=-0.1)
 
 
 class TestBatterySimulator:
@@ -141,6 +149,32 @@ class TestBatterySimulator:
         data2 = sim2.generate(datetime(2024, 6, 15, 12, 0, 0))
 
         assert data1.health_percent > data2.health_percent
+
+    def test_invalid_capacity_raises_error(self):
+        """Test invalid capacity raises ValueError."""
+        with pytest.raises(ValueError, match="capacity_kwh must be positive"):
+            BatterySimulator(capacity_kwh=0)
+
+        with pytest.raises(ValueError, match="capacity_kwh must be positive"):
+            BatterySimulator(capacity_kwh=-10)
+
+    def test_invalid_soc_bounds_raises_error(self):
+        """Test invalid SoC bounds raise ValueError."""
+        # initial_soc below min_soc
+        with pytest.raises(ValueError, match="SoC bounds must satisfy"):
+            BatterySimulator(initial_soc=5, min_soc=10, max_soc=90)
+
+        # initial_soc above max_soc
+        with pytest.raises(ValueError, match="SoC bounds must satisfy"):
+            BatterySimulator(initial_soc=95, min_soc=10, max_soc=90)
+
+        # min_soc > max_soc
+        with pytest.raises(ValueError, match="SoC bounds must satisfy"):
+            BatterySimulator(initial_soc=50, min_soc=90, max_soc=10)
+
+        # SoC bounds outside 0-100
+        with pytest.raises(ValueError, match="SoC bounds must satisfy"):
+            BatterySimulator(initial_soc=50, min_soc=-10, max_soc=90)
 
 
 class TestHomeLoadSimulator:

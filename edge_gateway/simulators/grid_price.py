@@ -33,7 +33,7 @@ class GridPriceSimulator(BaseSimulator):
         # Price volatility (for real-time pricing component)
         volatility: float = 0.15,
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Initialize grid price simulator.
 

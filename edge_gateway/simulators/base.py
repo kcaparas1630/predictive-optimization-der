@@ -9,13 +9,14 @@ import random
 class BaseSimulator(ABC):
     """Abstract base class for all simulators."""
 
-    def __init__(self, seed: int | None = None):
+    def __init__(self, seed: int | None = None) -> None:
         """
         Initialize the simulator.
 
         Args:
             seed: Random seed for reproducibility. If None, results will vary.
         """
+        # Using random.Random for simulation, not cryptographic purposes
         self._random = random.Random(seed)
 
     def _add_noise(self, value: float, noise_percent: float = 5.0) -> float:
@@ -47,4 +48,3 @@ class BaseSimulator(ABC):
         Returns:
             Simulated data appropriate for this simulator
         """
-        pass

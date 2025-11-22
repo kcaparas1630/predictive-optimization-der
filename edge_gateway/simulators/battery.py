@@ -30,7 +30,7 @@ class BatterySimulator(BaseSimulator):
         max_soc: float = 90.0,
         initial_cycles: int = 100,
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Initialize battery simulator.
 
@@ -45,6 +45,13 @@ class BatterySimulator(BaseSimulator):
             initial_cycles: Initial cycle count
             seed: Random seed for reproducibility
         """
+        if capacity_kwh <= 0:
+            raise ValueError("capacity_kwh must be positive")
+        if not (0 <= min_soc <= initial_soc <= max_soc <= 100):
+            raise ValueError(
+                "SoC bounds must satisfy 0 <= min_soc <= initial_soc <= max_soc <= 100"
+            )
+
         super().__init__(seed)
         self.capacity_kwh = capacity_kwh
         self.max_charge_rate_kw = max_charge_rate_kw
@@ -139,15 +146,18 @@ class BatterySimulator(BaseSimulator):
         """
         max_charge, max_discharge = self._get_power_limits(self._soc)
 
-        # Apply power limits
+        # Apply power limits and efficiency losses
+        # Split round-trip efficiency equally between charge and discharge (sqrt for each)
+        one_way_efficiency = self.round_trip_efficiency ** 0.5
+
         if power_kw > 0:
-            # Charging - apply efficiency loss
+            # Charging - apply efficiency loss (less energy stored than drawn)
             actual_power = min(power_kw, max_charge)
-            energy_stored = actual_power * duration_hours * self.round_trip_efficiency
+            energy_stored = actual_power * duration_hours * one_way_efficiency
         else:
-            # Discharging
+            # Discharging - apply efficiency loss (more energy drawn than delivered)
             actual_power = max(power_kw, -max_discharge)
-            energy_stored = actual_power * duration_hours
+            energy_stored = actual_power * duration_hours / one_way_efficiency
 
         # Update SoC
         soc_change = (energy_stored / self.capacity_kwh) * 100
