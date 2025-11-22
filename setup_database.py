@@ -66,16 +66,8 @@ CREATE POLICY "Allow all access" ON public.readings FOR ALL USING (true);
 
 """
 
-import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
-
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+from supabase_client import supabase
+from datetime import datetime, timezone
 
 
 def test_connection():
@@ -86,19 +78,22 @@ def test_connection():
         print(f"  Readings table accessible: {result.data is not None}")
         if result.data:
             print(f"  Sample data: {result.data}")
-        return True
+            return True
+        else:
+            return True
     except Exception as e:
         if "relation" in str(e) and "does not exist" in str(e):
             print("✓ Supabase connection successful!")
             print("  ✗ Readings table not yet created - run SQL commands in Supabase SQL Editor")
+            return False
         else:
             print(f"✗ Connection error: {e}")
-        return False
+            return False
 
 
 def insert_test_reading():
     """Insert a test reading to verify write access."""
-    from datetime import datetime, timezone
+    
 
     test_data = {
         "time": datetime.now(timezone.utc).isoformat(),
@@ -112,12 +107,15 @@ def insert_test_reading():
         result = supabase.table("readings").insert(test_data).execute()
         print("✓ Test reading inserted successfully!")
         print(f"  Data: {result.data}")
-        return True
     except Exception as e:
         print(f"✗ Insert error: {e}")
         return False
+    else:
+        return True
 
 
 if __name__ == "__main__":
     print("Testing Supabase connection...\n")
-    test_connection()
+    if test_connection():
+        print("\nInserting test reading...\n")
+        insert_test_reading()

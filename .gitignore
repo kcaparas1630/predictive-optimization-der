@@ -23,3 +23,9 @@ wheels/
 venv/
 ENV/
 env/
+.pytest_cache/
+.mypy_cache/
+pip-wheel-metadata/
+.vscode/
+.idea/
+.DS_Store
