@@ -6,7 +6,7 @@ module with environment variable overrides.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 
@@ -48,6 +48,16 @@ class FeatureEngineeringConfig:
     # Table names
     source_table: str = "readings"
     target_table: str = "training_data"
+
+    # Time-of-Use (TOU) schedule configuration
+    # Different utilities/regions have different TOU schedules
+    # Peak hours: tuple of (start_hour, end_hour) - exclusive end
+    tou_peak_hours: tuple[int, int] = (16, 21)  # 4pm-9pm
+    # Shoulder hours: list of (start_hour, end_hour) tuples
+    tou_shoulder_hours: list[tuple[int, int]] = field(
+        default_factory=lambda: [(7, 16), (21, 22)]  # 7am-4pm, 9pm-10pm
+    )
+    # Off-peak is implicit (remaining hours: 10pm-7am)
 
     # Metrics to include in feature engineering
     # These correspond to metric_name values in the readings table

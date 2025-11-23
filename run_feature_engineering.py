@@ -126,26 +126,34 @@ class FeatureEngineeringRunner:
         result = self._pipeline.run(start_time, end_time)
 
         if result["status"] == "success":
+            self._cycles_completed += 1
+            self._total_records_stored += result.get("records_stored", 0)
             logger.info(
                 "Pipeline completed: %d records processed, %d stored",
                 result.get("records_processed", 0),
                 result.get("records_stored", 0),
             )
         elif result["status"] == "no_data":
+            self._cycles_completed += 1  # Count as completed cycle
             logger.info("No data found in specified time range")
         else:
             logger.error("Pipeline failed: %s", result.get("error", "Unknown error"))
 
         return result
 
-    def run_continuous(self) -> None:
+    def run_continuous(self, max_consecutive_failures: int = 5) -> None:
         """Run the feature engineering pipeline continuously.
 
         Runs the pipeline at regular intervals until stopped
-        via signal (SIGINT/SIGTERM).
+        via signal (SIGINT/SIGTERM) or too many consecutive failures.
+
+        Args:
+            max_consecutive_failures: Stop after this many consecutive failures
+                to avoid infinite error loops from persistent misconfigurations.
         """
         self._running = True
         self._setup_signal_handlers()
+        consecutive_failures = 0
 
         logger.info(
             "Starting continuous feature engineering (interval: %ds)",
@@ -161,6 +169,7 @@ class FeatureEngineeringRunner:
                 if result["status"] == "success":
                     self._cycles_completed += 1
                     self._total_records_stored += result.get("records_stored", 0)
+                    consecutive_failures = 0  # Reset on success
                     logger.info(
                         "Cycle %d completed: %d records stored (total: %d)",
                         self._cycles_completed,
@@ -168,14 +177,34 @@ class FeatureEngineeringRunner:
                         self._total_records_stored,
                     )
                 elif result["status"] == "no_data":
+                    consecutive_failures = 0  # No data is not a failure
                     logger.debug("No new data to process")
                 else:
+                    consecutive_failures += 1
                     logger.warning(
-                        "Cycle failed: %s", result.get("error", "Unknown error")
+                        "Cycle failed (%d/%d): %s",
+                        consecutive_failures,
+                        max_consecutive_failures,
+                        result.get("error", "Unknown error"),
                     )
 
             except Exception:
-                logger.exception("Error during feature engineering cycle")
+                consecutive_failures += 1
+                logger.exception(
+                    "Error during feature engineering cycle (%d/%d)",
+                    consecutive_failures,
+                    max_consecutive_failures,
+                )
+
+            # Stop if too many consecutive failures (likely persistent misconfiguration)
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "Stopping after %d consecutive failures. "
+                    "Check configuration and logs for persistent errors.",
+                    consecutive_failures,
+                )
+                self._running = False
+                break
 
             # Wait for next cycle
             if self._running:
@@ -367,8 +396,8 @@ def main() -> int:
             lookback_days=args.lookback_days,
             interval_seconds=args.interval,
         )
-    except Exception as e:
-        logger.error("Failed to initialize feature engineering runner: %s", e)
+    except Exception:
+        logger.exception("Failed to initialize feature engineering runner")
         return 1
 
     try:

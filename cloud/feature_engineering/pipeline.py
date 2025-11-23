@@ -46,6 +46,13 @@ class FeatureEngineeringPipeline:
         >>> print(f"Processed {result['records_processed']} records")
     """
 
+    # Key metrics for lag features
+    LAG_METRICS = [
+        "solar.generation_kw",
+        "home_load.total_load_kw",
+        "grid_price.price_per_kwh",
+    ]
+
     def __init__(self, config: FeatureEngineeringConfig) -> None:
         """Initialize feature engineering pipeline.
 
@@ -202,6 +209,16 @@ class FeatureEngineeringPipeline:
 
         # Pivot to wide format
         # Group by time, site_id, device_id and spread metric_name into columns
+        # Check for duplicates that will be dropped
+        dup_check = df.groupby(["time", "site_id", "device_id", "metric_name"]).size()
+        if (dup_check > 1).any():
+            num_dups = (dup_check > 1).sum()
+            logger.warning(
+                "Found %d duplicate metric readings (same time/site/device/metric); "
+                "using first value",
+                num_dups,
+            )
+
         pivot_df = df.pivot_table(
             index=["time", "site_id", "device_id"],
             columns="metric_name",
@@ -372,17 +389,21 @@ class FeatureEngineeringPipeline:
             df["tou_shoulder"] = (df[tou_col] == "shoulder").astype(int)
             features_added += 3
         elif "hour_of_day" in df.columns:
-            # Infer time-of-use from hour
-            # Typical TOU schedule:
-            # - Peak: 4pm-9pm (16-21)
-            # - Shoulder: 7am-4pm, 9pm-10pm (7-16, 21-22)
-            # - Off-peak: 10pm-7am (22-7)
+            # Infer time-of-use from hour using configurable schedule
             hour = df["hour_of_day"]
-            df["tou_peak"] = ((hour >= 16) & (hour < 21)).astype(int)
-            df["tou_shoulder"] = (
-                ((hour >= 7) & (hour < 16)) | ((hour >= 21) & (hour < 22))
+            peak_start, peak_end = self.config.tou_peak_hours
+            df["tou_peak"] = ((hour >= peak_start) & (hour < peak_end)).astype(int)
+
+            # Build shoulder mask from configured ranges
+            shoulder_mask = False
+            for start, end in self.config.tou_shoulder_hours:
+                shoulder_mask = shoulder_mask | ((hour >= start) & (hour < end))
+            df["tou_shoulder"] = shoulder_mask.astype(int)
+
+            # Off-peak is everything else
+            df["tou_off_peak"] = (
+                (df["tou_peak"] == 0) & (df["tou_shoulder"] == 0)
             ).astype(int)
-            df["tou_off_peak"] = ((hour >= 22) | (hour < 7)).astype(int)
             features_added += 3
 
         logger.info("Added %d categorical features", features_added)
@@ -393,7 +414,7 @@ class FeatureEngineeringPipeline:
 
         Adds previous time step values for key prediction targets:
         - {metric}_lag_1: Value from 1 time step ago
-        - {metric}_lag_12: Value from 1 hour ago (12 * 5min = 60min)
+        - {metric}_lag_1h: Value from 1 hour ago (dynamic based on sampling rate)
 
         Args:
             df: DataFrame with metric columns
@@ -409,15 +430,17 @@ class FeatureEngineeringPipeline:
         df = df.copy()
         df = df.sort_values("time")
 
-        # Key metrics for lag features
-        lag_metrics = [
-            "solar.generation_kw",
-            "home_load.total_load_kw",
-            "grid_price.price_per_kwh",
-        ]
+        # Calculate samples per hour from actual data interval
+        samples_per_hour = 12  # default for 5-min intervals
+        if len(df) > 1 and "time" in df.columns:
+            time_diff_minutes = (
+                df["time"].iloc[1] - df["time"].iloc[0]
+            ).total_seconds() / 60
+            if time_diff_minutes > 0:
+                samples_per_hour = int(round(60 / time_diff_minutes))
 
         features_added = 0
-        for metric in lag_metrics:
+        for metric in self.LAG_METRICS:
             col_name = metric.replace(".", "_")
 
             if metric not in df.columns:
@@ -427,8 +450,8 @@ class FeatureEngineeringPipeline:
             df[f"{col_name}_lag_1"] = df[metric].shift(1)
             features_added += 1
 
-            # Lag 12 (1 hour ago, assuming 5-min intervals)
-            df[f"{col_name}_lag_12"] = df[metric].shift(12)
+            # Lag for 1 hour ago (dynamic based on sampling rate)
+            df[f"{col_name}_lag_1h"] = df[metric].shift(samples_per_hour)
             features_added += 1
 
         logger.info("Added %d lag features", features_added)
@@ -635,14 +658,10 @@ class FeatureEngineeringPipeline:
         features.extend(["tou_peak", "tou_off_peak", "tou_shoulder"])
 
         # Lag features
-        lag_metrics = [
-            "solar_generation_kw",
-            "home_load_total_load_kw",
-            "grid_price_price_per_kwh",
-        ]
-        for metric in lag_metrics:
-            features.append(f"{metric}_lag_1")
-            features.append(f"{metric}_lag_12")
+        for metric in self.LAG_METRICS:
+            col_name = metric.replace(".", "_")
+            features.append(f"{col_name}_lag_1")
+            features.append(f"{col_name}_lag_1h")
 
         return features
 

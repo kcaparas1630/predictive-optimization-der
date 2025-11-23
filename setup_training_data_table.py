@@ -65,11 +65,11 @@ CREATE TABLE public.training_data (
 
     -- Lag features
     solar_generation_kw_lag_1 DOUBLE PRECISION,
-    solar_generation_kw_lag_12 DOUBLE PRECISION,
+    solar_generation_kw_lag_1h DOUBLE PRECISION,
     home_load_total_load_kw_lag_1 DOUBLE PRECISION,
-    home_load_total_load_kw_lag_12 DOUBLE PRECISION,
+    home_load_total_load_kw_lag_1h DOUBLE PRECISION,
     grid_price_price_per_kwh_lag_1 DOUBLE PRECISION,
-    grid_price_price_per_kwh_lag_12 DOUBLE PRECISION,
+    grid_price_price_per_kwh_lag_1h DOUBLE PRECISION,
 
     -- Composite primary key
     PRIMARY KEY (time, site_id, device_id)
@@ -144,11 +144,11 @@ SELECT
     tou_shoulder,
     -- Lag features
     solar_generation_kw_lag_1,
-    solar_generation_kw_lag_12,
+    solar_generation_kw_lag_1h,
     home_load_total_load_kw_lag_1,
-    home_load_total_load_kw_lag_12,
+    home_load_total_load_kw_lag_1h,
     grid_price_price_per_kwh_lag_1,
-    grid_price_price_per_kwh_lag_12
+    grid_price_price_per_kwh_lag_1h
 FROM public.training_data;
 
 """
@@ -222,30 +222,42 @@ def test_connection() -> bool:
 
 
 def insert_test_record() -> bool:
-    """Insert a test record to verify write access."""
+    """Insert a test record to verify write access.
+
+    Returns:
+        True if insert successful, False if table doesn't exist.
+
+    Raises:
+        ValueError: If SUPABASE_URL or SUPABASE_KEY not configured.
+        PostgrestAPIError: For unexpected API errors (auth issues, network errors, etc.).
+    """
+    client = get_client()  # Let ValueError propagate for misconfiguration
+
+    test_data = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "site_id": "test-site",
+        "device_id": "test-device",
+        "solar.generation_kw": 5.5,
+        "hour_of_day": 12,
+        "day_of_week": 2,
+        "is_weekend": 0,
+        "tou_peak": 0,
+        "tou_off_peak": 0,
+        "tou_shoulder": 1,
+    }
+
     try:
-        client = get_client()
-
-        test_data = {
-            "time": datetime.now(timezone.utc).isoformat(),
-            "site_id": "test-site",
-            "device_id": "test-device",
-            "solar.generation_kw": 5.5,
-            "hour_of_day": 12,
-            "day_of_week": 2,
-            "is_weekend": 0,
-            "tou_peak": 0,
-            "tou_off_peak": 0,
-            "tou_shoulder": 1,
-        }
-
         result = client.table("training_data").insert(test_data).execute()
         print("Test record inserted successfully!")
         print(f"  Data: {result.data}")
         return True
-    except Exception as e:
-        print(f"Insert error: {e}")
-        return False
+    except PostgrestAPIError as e:
+        # Check for "relation does not exist" using structured error code
+        if getattr(e, "code", None) == POSTGRES_UNDEFINED_TABLE:
+            print("Insert failed: training_data table does not exist")
+            return False
+        # Re-raise unexpected API errors (auth issues, network errors, etc.)
+        raise
 
 
 def get_table_stats() -> dict:
