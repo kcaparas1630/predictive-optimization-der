@@ -66,29 +66,43 @@ CREATE POLICY "Allow all access" ON public.readings FOR ALL USING (true);
 
 """
 
-from supabase_client import supabase
 from datetime import datetime, timezone
+
+from postgrest.exceptions import APIError as PostgrestAPIError
+
+from supabase_client import supabase
+
+# PostgreSQL error code for "relation does not exist"
+POSTGRES_UNDEFINED_TABLE = "42P01"
 
 
 def test_connection():
-    """Test the Supabase connection."""
+    """Test the Supabase connection.
+
+    Returns:
+        True if connection successful and table exists, False if table missing.
+
+    Raises:
+        PostgrestAPIError: For unexpected API errors (auth, network, etc.).
+    """
     try:
         result = supabase.table("readings").select("*").limit(1).execute()
         print("✓ Supabase connection successful!")
         print(f"  Readings table accessible: {result.data is not None}")
         if result.data:
             print(f"  Sample data: {result.data}")
-            return True
-        else:
-            return True
-    except Exception as e:
-        if "relation" in str(e) and "does not exist" in str(e):
+        return True
+    except PostgrestAPIError as e:
+        # Check for "relation does not exist" using structured error code
+        if getattr(e, "code", None) == POSTGRES_UNDEFINED_TABLE:
             print("✓ Supabase connection successful!")
-            print("  ✗ Readings table not yet created - run SQL commands in Supabase SQL Editor")
+            print(
+                "  ✗ Readings table not yet created - "
+                "run SQL commands in Supabase SQL Editor"
+            )
             return False
-        else:
-            print(f"✗ Connection error: {e}")
-            return False
+        # Re-raise unexpected API errors (auth issues, network errors, etc.)
+        raise
 
 
 def insert_test_reading():
