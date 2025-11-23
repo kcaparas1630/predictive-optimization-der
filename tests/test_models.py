@@ -201,7 +201,7 @@ class TestDERData:
         d = data.to_dict()
 
         assert d["device_id"] == "test-gateway-001"
-        assert d["timestamp"] == "2024-06-15T14:30:00"
+        assert d["timestamp"] == "2024-06-15T14:30:00+00:00"
         assert "solar" in d
         assert "battery" in d
         assert "home_load" in d
