@@ -77,8 +77,12 @@ class TestBatteryData:
         )
         d = data.to_dict()
         assert d["soc_percent"] == 75.12
+        assert d["capacity_kwh"] == 13.5
         assert d["power_kw"] == 2.567
+        assert d["voltage_v"] == 52.1
+        assert d["temperature_celsius"] == 28.1
         assert d["cycles"] == 150
+        assert d["health_percent"] == 98.57
 
 
 class TestHomeLoadData:
@@ -109,6 +113,10 @@ class TestHomeLoadData:
         )
         d = data.to_dict()
         assert d["total_load_kw"] == 4.567
+        assert d["hvac_kw"] == 2.0
+        assert d["appliances_kw"] == 1.0
+        assert d["lighting_kw"] == 0.5
+        assert d["ev_charging_kw"] == 0.0
         assert d["other_kw"] == 1.067
 
 
@@ -138,7 +146,10 @@ class TestGridPriceData:
         )
         d = data.to_dict()
         assert d["price_per_kwh"] == 0.2567
+        assert d["feed_in_tariff"] == 0.0812
+        assert d["demand_charge"] == 10.05
         assert d["time_of_use_period"] == "shoulder"
+        assert d["carbon_intensity_g_kwh"] == 450.12
 
 
 class TestDERData:
@@ -224,5 +235,8 @@ class TestDERData:
         restored = DERData.from_dict(d)
 
         assert restored.device_id == original.device_id
+        assert restored.timestamp == original.timestamp
+        assert restored.timestamp.tzinfo is not None
+        assert restored.net_grid_flow_kw == original.net_grid_flow_kw
         assert restored.solar.generation_kw == original.solar.generation_kw
         assert restored.battery.soc_percent == original.battery.soc_percent
