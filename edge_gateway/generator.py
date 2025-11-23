@@ -187,7 +187,7 @@ class DataGeneratorRunner:
         generator: DERDataGenerator,
         output_callback: Optional[Callable[[DERData], None]] = None,
         output_file: Optional[Path] = None,
-        influxdb_config: Optional["InfluxDBConfig"] = None,
+        influxdb_config: Optional[InfluxDBConfig] = None,
     ) -> None:
         """
         Initialize the runner.
@@ -202,7 +202,7 @@ class DataGeneratorRunner:
         self.output_callback = output_callback
         self.output_file = output_file
         self._running = False
-        self._influxdb_storage: Optional["InfluxDBStorage"] = None
+        self._influxdb_storage: Optional[InfluxDBStorage] = None
 
         # Initialize InfluxDB storage if configured
         if influxdb_config is not None and influxdb_config.enabled:
@@ -215,7 +215,7 @@ class DataGeneratorRunner:
                     self._influxdb_storage = InfluxDBStorage(influxdb_config)
                     logger.info("InfluxDB storage initialized")
                 except Exception as e:
-                    logger.error("Failed to initialize InfluxDB storage: %s", e)
+                    logger.exception("Failed to initialize InfluxDB storage: %s", e)
 
     def _output_data(self, data: DERData) -> None:
         """Output data to configured destinations."""

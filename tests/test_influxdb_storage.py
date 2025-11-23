@@ -347,7 +347,7 @@ class TestInfluxDBStorage:
             InfluxDBStorage.MEASUREMENT_SYSTEM,
         ]
 
-        for point, expected_name in zip(points, measurement_names):
+        for point, expected_name in zip(points, measurement_names, strict = True):
             # Point objects have _name attribute in influxdb-client
             assert point._name == expected_name
 
@@ -373,7 +373,7 @@ class TestInfluxDBStorageBatching:
             flush_interval_ms=5000,
         )
 
-        _storage = InfluxDBStorage(config)  # noqa: F841
+        storage = InfluxDBStorage(config)
 
         # Verify write_api was called with WriteOptions
         call_args = mock_client.write_api.call_args

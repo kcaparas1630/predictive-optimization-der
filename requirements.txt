@@ -1,5 +1,5 @@
 # DER Data Simulator Dependencies
-# Core package uses only Python standard library
+# Core dependencies for DER data generation and storage
 
 # Local TSDB (InfluxDB) - Required for edge gateway local storage
 influxdb-client>=1.40.0

@@ -6,6 +6,7 @@ before potential sync to cloud services.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -30,6 +31,12 @@ except ImportError:
 class InfluxDBConfig:
     """Configuration for InfluxDB connection.
 
+    Supports environment variable overrides:
+    - INFLUXDB_URL: Server URL
+    - INFLUXDB_TOKEN: Authentication token
+    - INFLUXDB_ORG: Organization name
+    - INFLUXDB_BUCKET: Bucket name
+
     Attributes:
         url: InfluxDB server URL (e.g., "http://localhost:8086")
         token: Authentication token for InfluxDB
@@ -49,6 +56,20 @@ class InfluxDBConfig:
     retention_days: int = 7
     batch_size: int = 1
     flush_interval_ms: int = 1000
+
+    def __post_init__(self) -> None:
+        """Apply environment variable overrides only when values are at defaults.
+
+        Precedence: explicit args > env vars > defaults
+        """
+        if self.url == "http://localhost:8086":
+            self.url = os.environ.get("INFLUXDB_URL", self.url)
+        if self.token == "":
+            self.token = os.environ.get("INFLUXDB_TOKEN", self.token)
+        if self.org == "edge-gateway":
+            self.org = os.environ.get("INFLUXDB_ORG", self.org)
+        if self.bucket == "der-data":
+            self.bucket = os.environ.get("INFLUXDB_BUCKET", self.bucket)
 
 
 class InfluxDBStorage:
@@ -139,7 +160,7 @@ class InfluxDBStorage:
                 self.config.bucket,
             )
         except Exception as e:
-            logger.error("Failed to connect to InfluxDB: %s", e)
+            logger.exception("Failed to connect to InfluxDB: %s", e)
             raise
 
     def is_connected(self) -> bool:
@@ -205,7 +226,7 @@ class InfluxDBStorage:
             )
             return True
         except Exception as e:
-            logger.error("Failed to write to InfluxDB: %s", e)
+            logger.exception("Failed to write to InfluxDB: %s", e)
             return False
 
     def write_batch(self, data_list: list[DERData]) -> bool:
@@ -241,7 +262,7 @@ class InfluxDBStorage:
             )
             return True
         except Exception as e:
-            logger.error("Failed to batch write to InfluxDB: %s", e)
+            logger.exception("Failed to batch write to InfluxDB: %s", e)
             return False
 
     def _der_data_to_points(self, data: DERData) -> list:
@@ -385,7 +406,7 @@ class InfluxDBStorage:
 
             return True
         except Exception as e:
-            logger.error("Failed to setup retention policy: %s", e)
+            logger.exception("Failed to setup retention policy: %s", e)
             return False
 
     def close(self) -> None:
@@ -393,15 +414,15 @@ class InfluxDBStorage:
         if self._write_api:
             try:
                 self._write_api.close()
-            except Exception:
-                pass  # Ignore close errors
+            except Exception as e:
+              logger.debug("Error closing InfluxDB write API: %s", e)
             self._write_api = None
 
         if self._client:
             try:
                 self._client.close()
-            except Exception:
-                pass  # Ignore close errors
+            except Exception as e:
+                logger.debug("Error closing InfluxDB client: %s", e)
             self._client = None
 
         logger.info("Closed InfluxDB connection")

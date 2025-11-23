@@ -12,6 +12,8 @@ services:
       - influxdb-config:/etc/influxdb2
     environment:
       # Initial setup configuration
+      # WARNING: These credentials are for LOCAL DEVELOPMENT ONLY
+      # For production, use strong passwords and tokens stored in secrets management
       - DOCKER_INFLUXDB_INIT_MODE=setup
       - DOCKER_INFLUXDB_INIT_USERNAME=admin
       - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword123

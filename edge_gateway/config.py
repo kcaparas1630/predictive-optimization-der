@@ -1,38 +1,11 @@
 """Configuration management for the DER data generator."""
 
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-
-@dataclass
-class InfluxDBConfig:
-    """InfluxDB storage configuration for local TSDB.
-
-    Supports environment variable overrides:
-    - INFLUXDB_URL: Server URL
-    - INFLUXDB_TOKEN: Authentication token
-    - INFLUXDB_ORG: Organization name
-    - INFLUXDB_BUCKET: Bucket name
-    """
-
-    url: str = "http://localhost:8086"
-    token: str = ""
-    org: str = "edge-gateway"
-    bucket: str = "der-data"
-    enabled: bool = False
-    retention_days: int = 7
-    batch_size: int = 1
-    flush_interval_ms: int = 1000
-
-    def __post_init__(self) -> None:
-        """Apply environment variable overrides."""
-        self.url = os.environ.get("INFLUXDB_URL", self.url)
-        self.token = os.environ.get("INFLUXDB_TOKEN", self.token)
-        self.org = os.environ.get("INFLUXDB_ORG", self.org)
-        self.bucket = os.environ.get("INFLUXDB_BUCKET", self.bucket)
+from edge_gateway.storage import InfluxDBConfig
 
 
 @dataclass
