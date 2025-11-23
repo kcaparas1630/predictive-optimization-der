@@ -17,14 +17,16 @@ Options:
     --status            Show current sync status and exit
 
 Environment variables:
-    SUPABASE_URL        Supabase project URL
-    SUPABASE_KEY        Supabase API key
-    INFLUXDB_URL        InfluxDB server URL
-    INFLUXDB_TOKEN      InfluxDB authentication token
-    INFLUXDB_ORG        InfluxDB organization
-    INFLUXDB_BUCKET     InfluxDB bucket name
-    SYNC_BATCH_SIZE     Records per sync batch
-    SYNC_SITE_ID        Site identifier for readings
+    SUPABASE_URL          Supabase project URL
+    SUPABASE_KEY          Supabase API key
+    INFLUXDB_URL          InfluxDB server URL
+    INFLUXDB_TOKEN        InfluxDB authentication token
+    INFLUXDB_ORG          InfluxDB organization
+    INFLUXDB_BUCKET       InfluxDB bucket name
+    SYNC_BATCH_SIZE       Records per sync batch
+    SYNC_INTERVAL_SECONDS Sync interval in seconds
+    SYNC_STATE_FILE       Path to sync state file
+    SYNC_SITE_ID          Site identifier for readings
 """
 
 import argparse
@@ -40,7 +42,7 @@ from dotenv import load_dotenv
 # Must happen before importing modules that use env vars
 load_dotenv()
 
-from edge_gateway.storage.cloud_sync import CloudSync, CloudSyncConfig  # noqa: E402
+from edge_gateway.storage.cloud_sync import CloudSync, CloudSyncConfig
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class CloudSyncRunner:
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
-    def _handle_signal(self, signum: int, frame) -> None:
+    def _handle_signal(self, signum: int, _frame) -> None:
         """Handle shutdown signals."""
         logger.info("Received signal %d, initiating shutdown...", signum)
         self._running = False
@@ -182,7 +184,7 @@ class CloudSyncRunner:
             return sync.get_sync_status()
 
 
-def setup_logging(quiet: bool = False, debug: bool = False) -> None:
+def setup_logging(*, quiet: bool = False, debug: bool = False) -> None:
     """Configure logging for the application.
 
     Args:
@@ -332,8 +334,8 @@ def main() -> int:
         try:
             file_config = load_config_from_file(args.config)
             logger.info("Loaded configuration from %s", args.config)
-        except Exception as e:
-            logger.error("Failed to load config file: %s", e)
+        except (OSError, ValueError):
+            logger.exception("Failed to load config file %s", args.config)
             return 1
 
     # Build CloudSyncConfig with CLI overrides
@@ -344,9 +346,13 @@ def main() -> int:
         supabase_key=args.supabase_key or cloud_sync_config.get("supabase_key", ""),
         enabled=True,  # Always enabled when running this script
         batch_size=args.batch_size or cloud_sync_config.get("batch_size", 100),
-        sync_interval_seconds=args.interval
-        or cloud_sync_config.get("sync_interval_seconds", 60),
+        sync_interval_seconds=(
+            args.interval or cloud_sync_config.get("sync_interval_seconds", 60)
+        ),
+        state_file=cloud_sync_config.get("state_file", ".sync_state.json"),
         site_id=args.site_id or cloud_sync_config.get("site_id", "edge-gateway-site"),
+        max_retries=cloud_sync_config.get("max_retries", 3),
+        retry_delay_seconds=cloud_sync_config.get("retry_delay_seconds", 5),
     )
 
     # Get InfluxDB configuration
@@ -394,8 +400,8 @@ def main() -> int:
             influxdb_org=influxdb_org,
             influxdb_bucket=influxdb_bucket,
         )
-    except Exception as e:
-        logger.error("Failed to initialize sync runner: %s", e)
+    except Exception:
+        logger.exception("Failed to initialize sync runner")
         return 1
 
     # Execute based on mode

@@ -16,16 +16,18 @@ from edge_gateway.storage.cloud_sync import (
 
 # Check if required libraries are available
 try:
-    import influxdb_client  # noqa: F401
+    import influxdb_client
 
     INFLUXDB_AVAILABLE = True
+    del influxdb_client  # Only needed for feature detection
 except ImportError:
     INFLUXDB_AVAILABLE = False
 
 try:
-    import supabase  # noqa: F401
+    import supabase
 
     SUPABASE_AVAILABLE = True
+    del supabase  # Only needed for feature detection
 except ImportError:
     SUPABASE_AVAILABLE = False
 
@@ -88,6 +90,34 @@ class TestCloudSyncConfig:
         assert config.sync_interval_seconds == 30
         assert config.state_file == "/env/state.json"
         assert config.site_id == "env-site"
+
+    def test_invalid_batch_size_env_var_raises_error(self, monkeypatch):
+        """Test that invalid SYNC_BATCH_SIZE raises ValueError."""
+        monkeypatch.setenv("SYNC_BATCH_SIZE", "100ms")
+
+        with pytest.raises(ValueError, match="SYNC_BATCH_SIZE must be an integer"):
+            CloudSyncConfig()
+
+    def test_invalid_interval_env_var_raises_error(self, monkeypatch):
+        """Test that invalid SYNC_INTERVAL_SECONDS raises ValueError."""
+        monkeypatch.setenv("SYNC_INTERVAL_SECONDS", "abc")
+
+        with pytest.raises(ValueError, match="SYNC_INTERVAL_SECONDS must be an integer"):
+            CloudSyncConfig()
+
+    def test_explicit_args_override_env_vars(self, monkeypatch):
+        """Test that explicit constructor args take precedence over env vars."""
+        monkeypatch.setenv("SUPABASE_URL", "https://env.supabase.co")
+        monkeypatch.setenv("SYNC_BATCH_SIZE", "200")
+
+        config = CloudSyncConfig(
+            supabase_url="https://explicit.supabase.co",
+            batch_size=50,
+        )
+
+        # Explicit args should win
+        assert config.supabase_url == "https://explicit.supabase.co"
+        assert config.batch_size == 50
 
 
 class TestSyncState:
@@ -180,6 +210,44 @@ class TestSyncState:
             assert state.total_synced == 0
         finally:
             Path(state_file).unlink(missing_ok=True)
+
+    def test_invalid_last_sync_time_format(self):
+        """Test handling of invalid ISO-8601 timestamp in state file."""
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", delete=False, mode="w"
+        ) as f:
+            # Valid JSON but invalid timestamp format
+            json.dump({"last_sync_time": "invalid-date", "total_synced": 50}, f)
+            state_file = f.name
+
+        try:
+            state = SyncState(state_file)
+
+            # Should return None without raising, not crash
+            assert state.last_sync_time is None
+            # Other valid fields should still load
+            assert state.total_synced == 50
+        finally:
+            Path(state_file).unlink(missing_ok=True)
+
+    def test_nested_state_file_creates_parent_dirs(self):
+        """Test that nested state file path creates parent directories."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested_path = Path(tmpdir) / "nested" / "path" / "that" / "does" / "not" / "exist" / "state.json"
+
+            state = SyncState(str(nested_path))
+            sync_time = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+
+            # This should create the nested directories and save the file
+            state.update_success(sync_time, 100)
+
+            assert nested_path.exists()
+            assert nested_path.parent.exists()
+
+            # Verify state was saved correctly
+            state2 = SyncState(str(nested_path))
+            assert state2.last_sync_time == sync_time
+            assert state2.total_synced == 100
 
     def test_get_status(self):
         """Test get_status returns complete information."""
@@ -290,6 +358,54 @@ class TestCloudSync:
                 config,
                 influxdb_url="http://localhost:8086",
                 influxdb_token="",
+                influxdb_org="test-org",
+                influxdb_bucket="test-bucket",
+            )
+
+    @patch("edge_gateway.storage.cloud_sync.create_client")
+    @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
+    def test_influxdb_connection_failure_propagates(
+        self, mock_influx_class, mock_supabase_create
+    ):
+        """Test that InfluxDB connection failure propagates exception."""
+        mock_influx_class.side_effect = ConnectionError("Connection refused")
+
+        config = CloudSyncConfig(
+            enabled=True,
+            supabase_url="https://test.supabase.co",
+            supabase_key="test-key",
+        )
+
+        with pytest.raises(ConnectionError, match="Connection refused"):
+            CloudSync(
+                config,
+                influxdb_url="http://localhost:8086",
+                influxdb_token="test-token",
+                influxdb_org="test-org",
+                influxdb_bucket="test-bucket",
+            )
+
+    @patch("edge_gateway.storage.cloud_sync.create_client")
+    @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
+    def test_supabase_connection_failure_propagates(
+        self, mock_influx_class, mock_supabase_create
+    ):
+        """Test that Supabase connection failure propagates exception."""
+        mock_influx = Mock()
+        mock_influx_class.return_value = mock_influx
+        mock_supabase_create.side_effect = ConnectionError("Supabase unreachable")
+
+        config = CloudSyncConfig(
+            enabled=True,
+            supabase_url="https://test.supabase.co",
+            supabase_key="test-key",
+        )
+
+        with pytest.raises(ConnectionError, match="Supabase unreachable"):
+            CloudSync(
+                config,
+                influxdb_url="http://localhost:8086",
+                influxdb_token="test-token",
                 influxdb_org="test-org",
                 influxdb_bucket="test-bucket",
             )
@@ -463,18 +579,69 @@ class TestCloudSync:
                 influxdb_bucket="test-bucket",
             )
 
-            # Test query without start time
+            # Test query without start time - should use relative time
             query = sync._build_flux_query("solar", None, 100)
             assert "test-bucket" in query
             assert 'r._measurement == "solar"' in query
             assert "generation_kw" in query
             assert "limit(n: 100)" in query
+            assert "start: -24h" in query  # Fallback when no start_time
 
-            # Test query with start time
+            # Test query with start time - validate RFC3339 format
             start = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
             query_with_start = sync._build_flux_query("solar", start, 50)
-            assert "2024-06-15" in query_with_start
             assert "limit(n: 50)" in query_with_start
+            # Must have valid RFC3339 with Z suffix, not +00:00Z (invalid)
+            assert "start: 2024-06-15T14:30:00Z" in query_with_start
+            assert "+00:00Z" not in query_with_start  # Invalid format must not appear
+
+            # Test with non-UTC timezone - should convert to UTC with Z
+            from datetime import timedelta
+            pst = timezone(timedelta(hours=-8))
+            start_pst = datetime(2024, 6, 15, 6, 30, 0, tzinfo=pst)  # Same instant as 14:30 UTC
+            query_pst = sync._build_flux_query("solar", start_pst, 50)
+            assert "start: 2024-06-15T14:30:00Z" in query_pst
+
+            sync.close()
+        finally:
+            Path(state_file).unlink(missing_ok=True)
+
+    @patch("edge_gateway.storage.cloud_sync.create_client")
+    @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
+    def test_build_flux_query_missing_field_mappings(
+        self, mock_influx_class, mock_supabase_create
+    ):
+        """Test _build_flux_query returns empty string for unmapped measurement."""
+        mock_influx = Mock()
+        mock_influx_class.return_value = mock_influx
+
+        mock_supabase = Mock()
+        mock_supabase_create.return_value = mock_supabase
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            state_file = f.name
+
+        try:
+            config = CloudSyncConfig(
+                enabled=True,
+                supabase_url="https://test.supabase.co",
+                supabase_key="test-key",
+                state_file=state_file,
+            )
+
+            sync = CloudSync(
+                config,
+                influxdb_url="http://localhost:8086",
+                influxdb_token="test-token",
+                influxdb_org="test-org",
+                influxdb_bucket="test-bucket",
+            )
+
+            # Query for a measurement not in FIELD_MAPPINGS
+            result = sync._build_flux_query("unknown_measurement", None, 100)
+
+            # Should return empty string, not invalid Flux
+            assert result == ""
 
             sync.close()
         finally:
@@ -604,6 +771,76 @@ class TestCloudSync:
         finally:
             Path(state_file).unlink(missing_ok=True)
 
+    @patch("edge_gateway.storage.cloud_sync.logger")
+    @patch("edge_gateway.storage.cloud_sync.create_client")
+    @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
+    def test_push_to_supabase_logs_exception_on_final_failure(
+        self, mock_influx_class, mock_supabase_create, mock_logger
+    ):
+        """Test that logger.exception is called on final retry failure."""
+        mock_influx = Mock()
+        mock_influx_class.return_value = mock_influx
+
+        # Mock Supabase to always fail
+        mock_upsert = Mock()
+        mock_upsert.execute.side_effect = Exception("Network error")
+        mock_table = Mock()
+        mock_table.upsert.return_value = mock_upsert
+        mock_supabase = Mock()
+        mock_supabase.table.return_value = mock_table
+        mock_supabase_create.return_value = mock_supabase
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            state_file = f.name
+
+        try:
+            config = CloudSyncConfig(
+                enabled=True,
+                supabase_url="https://test.supabase.co",
+                supabase_key="test-key",
+                state_file=state_file,
+                max_retries=3,
+                retry_delay_seconds=0,
+            )
+
+            sync = CloudSync(
+                config,
+                influxdb_url="http://localhost:8086",
+                influxdb_token="test-token",
+                influxdb_org="test-org",
+                influxdb_bucket="test-bucket",
+            )
+
+            records = [
+                {
+                    "time": "2024-06-15T14:30:00+00:00",
+                    "site_id": "test-site",
+                    "device_id": "test-device",
+                    "metric_name": "solar.generation_kw",
+                    "metric_value": 7.5,
+                }
+            ]
+
+            successful, failed = sync._push_to_supabase(records)
+
+            # Should fail after all retries
+            assert successful == 0
+            assert failed == 1
+
+            # Verify logger.exception was called exactly once on final failure
+            exception_calls = [
+                call for call in mock_logger.exception.call_args_list
+                if "Failed to push batch" in str(call)
+            ]
+            assert len(exception_calls) == 1
+
+            # Verify warning was called for each retry attempt (with exc_info)
+            assert mock_logger.warning.call_count == 3
+
+            sync.close()
+        finally:
+            Path(state_file).unlink(missing_ok=True)
+
     @patch("edge_gateway.storage.cloud_sync.create_client")
     @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
     def test_context_manager(self, mock_influx_class, mock_supabase_create):
@@ -635,6 +872,82 @@ class TestCloudSync:
                 assert sync.is_connected()
 
             mock_influx.close.assert_called_once()
+        finally:
+            Path(state_file).unlink(missing_ok=True)
+
+    @patch("edge_gateway.storage.cloud_sync.create_client")
+    @patch("edge_gateway.storage.cloud_sync.InfluxDBClient")
+    def test_sync_does_not_advance_state_on_partial_failure(
+        self, mock_influx_class, mock_supabase_create
+    ):
+        """Sync must not advance last_sync_time when some batches fail."""
+        mock_influx = Mock()
+        mock_influx_class.return_value = mock_influx
+
+        mock_supabase = Mock()
+        mock_supabase_create.return_value = mock_supabase
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            state_file = f.name
+
+        try:
+            config = CloudSyncConfig(
+                enabled=True,
+                supabase_url="https://test.supabase.co",
+                supabase_key="test-key",  # noqa: S106
+                state_file=state_file,
+            )
+
+            sync = CloudSync(
+                config,
+                influxdb_url="http://localhost:8086",
+                influxdb_token="test-token",  # noqa: S106
+                influxdb_org="test-org",
+                influxdb_bucket="test-bucket",
+            )
+
+            records = [
+                {
+                    "time": "2024-06-15T14:00:00+00:00",
+                    "site_id": "test-site",
+                    "device_id": "test-device",
+                    "metric_name": "solar.generation_kw",
+                    "metric_value": 1.0,
+                },
+                {
+                    "time": "2024-06-15T14:05:00+00:00",
+                    "site_id": "test-site",
+                    "device_id": "test-device",
+                    "metric_name": "solar.generation_kw",
+                    "metric_value": 2.0,
+                },
+                {
+                    "time": "2024-06-15T14:10:00+00:00",
+                    "site_id": "test-site",
+                    "device_id": "test-device",
+                    "metric_name": "solar.generation_kw",
+                    "metric_value": 3.0,
+                },
+                {
+                    "time": "2024-06-15T14:15:00+00:00",
+                    "site_id": "test-site",
+                    "device_id": "test-device",
+                    "metric_name": "solar.generation_kw",
+                    "metric_value": 4.0,
+                },
+            ]
+
+            sync.query_unsynced_data = Mock(return_value=records)
+            sync._push_to_supabase = Mock(return_value=(2, 2))
+
+            successful, failed = sync.sync()
+
+            assert successful == 2
+            assert failed == 2
+            # State should NOT be advanced on partial failure
+            assert sync._sync_state.last_sync_time is None
+
+            sync.close()
         finally:
             Path(state_file).unlink(missing_ok=True)
 

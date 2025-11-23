@@ -15,18 +15,20 @@ import time as time_module
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 logger = logging.getLogger(__name__)
 
 # Optional imports for InfluxDB and Supabase
 try:
     from influxdb_client import InfluxDBClient
+    from influxdb_client.client.flux_table import FluxRecord
 
     INFLUXDB_AVAILABLE = True
 except ImportError:
     INFLUXDB_AVAILABLE = False
     InfluxDBClient = None  # type: ignore
+    FluxRecord = None  # type: ignore
 
 try:
     from supabase import Client, create_client
@@ -45,9 +47,10 @@ class CloudSyncConfig:
     Supports environment variable overrides:
     - SUPABASE_URL: Supabase project URL
     - SUPABASE_KEY: Supabase API key (anon or service role)
-    - SYNC_BATCH_SIZE: Number of records per batch
-    - SYNC_INTERVAL_SECONDS: Seconds between sync operations
+    - SYNC_BATCH_SIZE: Number of records per batch (must be integer)
+    - SYNC_INTERVAL_SECONDS: Seconds between sync operations (must be integer)
     - SYNC_STATE_FILE: Path to sync state file
+    - SYNC_SITE_ID: Site identifier for the readings table
 
     Attributes:
         supabase_url: Supabase project URL
@@ -83,11 +86,21 @@ class CloudSyncConfig:
         if self.batch_size == 100:
             env_batch = os.environ.get("SYNC_BATCH_SIZE")
             if env_batch:
-                self.batch_size = int(env_batch)
+                try:
+                    self.batch_size = int(env_batch)
+                except ValueError as e:
+                    raise ValueError(
+                        f"SYNC_BATCH_SIZE must be an integer, got: {env_batch!r}"
+                    ) from e
         if self.sync_interval_seconds == 60:
             env_interval = os.environ.get("SYNC_INTERVAL_SECONDS")
             if env_interval:
-                self.sync_interval_seconds = int(env_interval)
+                try:
+                    self.sync_interval_seconds = int(env_interval)
+                except ValueError as e:
+                    raise ValueError(
+                        f"SYNC_INTERVAL_SECONDS must be an integer, got: {env_interval!r}"
+                    ) from e
         if self.state_file == ".sync_state.json":
             self.state_file = os.environ.get("SYNC_STATE_FILE", self.state_file)
         if self.site_id == "edge-gateway-site":
@@ -131,18 +144,27 @@ class SyncState:
     def _save_state(self) -> None:
         """Save current state to file."""
         try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.state_file, "w") as f:
                 json.dump(self._state, f, indent=2, default=str)
             logger.debug("Saved sync state to %s", self.state_file)
-        except OSError as e:
-            logger.error("Failed to save sync state: %s", e)
+        except OSError:
+            logger.exception("Failed to save sync state")
 
     @property
     def last_sync_time(self) -> Optional[datetime]:
         """Get the last successful sync timestamp."""
         time_str = self._state.get("last_sync_time")
         if time_str:
-            return datetime.fromisoformat(time_str)
+            try:
+                return datetime.fromisoformat(time_str)
+            except ValueError:
+                logger.warning(
+                    "Invalid last_sync_time in state file %s: %r; treating as None",
+                    self.state_file,
+                    time_str,
+                )
+                return None
         return None
 
     @property
@@ -210,15 +232,27 @@ class CloudSync:
         ...     supabase_key="your-key",
         ...     enabled=True
         ... )
-        >>> sync = CloudSync(config, influxdb_config)
+        >>> sync = CloudSync(
+        ...     config,
+        ...     influxdb_url="http://localhost:8086",
+        ...     influxdb_token="your-token",
+        ...     influxdb_org="edge-gateway",
+        ...     influxdb_bucket="der-data",
+        ... )
         >>> sync.sync()
     """
 
     # Measurements to sync from InfluxDB
-    MEASUREMENTS = ["solar", "battery", "home_load", "grid_price", "system"]
+    MEASUREMENTS: ClassVar[list[str]] = [
+        "solar",
+        "battery",
+        "home_load",
+        "grid_price",
+        "system",
+    ]
 
     # Field mappings from InfluxDB to Supabase metric names
-    FIELD_MAPPINGS = {
+    FIELD_MAPPINGS: ClassVar[dict[str, list[str]]] = {
         "solar": [
             "generation_kw",
             "irradiance_w_m2",
@@ -301,22 +335,21 @@ class CloudSync:
         """Validate required libraries are installed."""
         if not INFLUXDB_AVAILABLE:
             raise ImportError(
-                "influxdb-client is not installed. "
-                "Install it with: pip install influxdb-client"
+                "influxdb-client is not installed; install with `pip install influxdb-client`"
             )
         if not SUPABASE_AVAILABLE:
             raise ImportError(
-                "supabase is not installed. " "Install it with: pip install supabase"
+                "supabase is not installed; install with `pip install supabase`"
             )
 
     def _validate_config(self) -> None:
         """Validate configuration values."""
         if not self.config.supabase_url:
-            raise ValueError("Supabase URL is required when cloud sync is enabled")
+            raise ValueError("Supabase URL is required for cloud sync")
         if not self.config.supabase_key:
-            raise ValueError("Supabase key is required when cloud sync is enabled")
+            raise ValueError("Supabase key is required for cloud sync")
         if not self._influxdb_token:
-            raise ValueError("InfluxDB token is required for cloud sync")
+            raise ValueError("InfluxDB token is required")
 
     def _connect(self) -> None:
         """Establish connections to InfluxDB and Supabase."""
@@ -331,8 +364,8 @@ class CloudSync:
                 "Connected to InfluxDB at %s for cloud sync",
                 self._influxdb_url,
             )
-        except Exception as e:
-            logger.exception("Failed to connect to InfluxDB: %s", e)
+        except Exception:
+            logger.exception("Failed to connect to InfluxDB")
             raise
 
         # Connect to Supabase
@@ -345,8 +378,8 @@ class CloudSync:
                 "Connected to Supabase at %s",
                 self.config.supabase_url,
             )
-        except Exception as e:
-            logger.exception("Failed to connect to Supabase: %s", e)
+        except Exception:
+            logger.exception("Failed to connect to Supabase")
             raise
 
     def is_connected(self) -> bool:
@@ -374,7 +407,7 @@ class CloudSync:
         try:
             health = self._influx_client.health()
             status["influxdb"] = health.status == "pass"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - health check intentionally catches all
             logger.warning("InfluxDB health check failed: %s", e)
 
         # Check Supabase
@@ -382,7 +415,7 @@ class CloudSync:
             # Simple query to verify connection
             self._supabase_client.table("readings").select("time").limit(1).execute()
             status["supabase"] = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - health check intentionally catches all
             logger.warning("Supabase health check failed: %s", e)
 
         return status
@@ -419,6 +452,8 @@ class CloudSync:
                 start_time,
                 limit or self.config.batch_size,
             )
+            if not flux_query:
+                continue
 
             try:
                 tables = query_api.query(flux_query, org=self._influxdb_org)
@@ -459,14 +494,24 @@ class CloudSync:
         Returns:
             Flux query string
         """
-        # Start time handling
+        # Start time handling - ensure valid RFC3339 format for InfluxDB
         if start_time:
-            start_filter = f'start: {start_time.isoformat()}Z'
+            # Convert to UTC and format with Z suffix (not +00:00Z)
+            utc_time = start_time.astimezone(timezone.utc)
+            # isoformat() produces +00:00 for UTC, replace with Z for RFC3339
+            time_str = utc_time.isoformat().replace("+00:00", "Z")
+            start_filter = f"start: {time_str}"
         else:
             # Default to last 24 hours if no sync state
             start_filter = "start: -24h"
 
         fields = self.FIELD_MAPPINGS.get(measurement, [])
+        if not fields:
+            logger.warning(
+                "No field mappings defined for measurement %r; skipping",
+                measurement,
+            )
+            return ""
         field_filter = " or ".join([f'r._field == "{f}"' for f in fields])
 
         query = f'''
@@ -482,7 +527,7 @@ from(bucket: "{self._influxdb_bucket}")
     def _transform_record(
         self,
         measurement: str,
-        record: Any,
+        record: "FluxRecord",
     ) -> Optional[dict[str, Any]]:
         """Transform InfluxDB record to Supabase format.
 
@@ -495,44 +540,54 @@ from(bucket: "{self._influxdb_bucket}")
 
         Args:
             measurement: The measurement name
-            record: InfluxDB record object
+            record: InfluxDB FluxRecord object from query results
 
         Returns:
             Dictionary ready for Supabase insertion, or None if invalid
         """
-        try:
-            timestamp = record.get_time()
-            if timestamp is None:
-                return None
-
-            # Format timestamp for Supabase
-            if hasattr(timestamp, "isoformat"):
-                time_str = timestamp.isoformat()
-            else:
-                time_str = str(timestamp)
-
-            # Get device_id from tags
-            device_id = record.values.get("device_id", "unknown")
-
-            # Build metric name from measurement and field
-            field_name = record.get_field()
-            metric_name = f"{measurement}.{field_name}"
-
-            # Get the value
-            value = record.get_value()
-            if value is None:
-                return None
-
-            return {
-                "time": time_str,
-                "site_id": self.config.site_id,
-                "device_id": device_id,
-                "metric_name": metric_name,
-                "metric_value": float(value),
-            }
-        except Exception as e:
-            logger.warning("Failed to transform record: %s", e)
+        timestamp = record.get_time()
+        if timestamp is None:
+            logger.warning("Record missing timestamp, skipping")
             return None
+
+        # Format timestamp for Supabase
+        if hasattr(timestamp, "isoformat"):
+            time_str = timestamp.isoformat()
+        else:
+            time_str = str(timestamp)
+
+        # Get device_id from tags
+        device_id = record.values.get("device_id", "unknown")
+
+        # Build metric name from measurement and field
+        field_name = record.get_field()
+        metric_name = f"{measurement}.{field_name}"
+
+        # Get the value
+        value = record.get_value()
+        if value is None:
+            logger.warning("Record %s has None value, skipping", metric_name)
+            return None
+
+        # Convert value to float with specific exception handling
+        try:
+            metric_value = float(value)
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "Failed to convert value %r to float for %s: %s",
+                value,
+                metric_name,
+                e,
+            )
+            return None
+
+        return {
+            "time": time_str,
+            "site_id": self.config.site_id,
+            "device_id": device_id,
+            "metric_name": metric_name,
+            "metric_value": metric_value,
+        }
 
     def sync(self) -> tuple[int, int]:
         """Perform a sync operation.
@@ -563,17 +618,21 @@ from(bucket: "{self._influxdb_bucket}")
         # Sync to Supabase
         successful, failed = self._push_to_supabase(records)
 
-        # Update sync state with the latest timestamp
-        if successful > 0:
-            # Find the latest timestamp from synced records
+        # Update sync state - only advance cursor when ALL records succeed
+        # to prevent data loss from partial batch failures
+        if failed > 0:
+            # Do NOT advance the cursor; rely on upsert to de-duplicate
+            # when we retry the whole window next time
+            if self._sync_state:
+                self._sync_state.update_error(f"Failed to sync {failed} records")
+        elif successful > 0:
+            # All records in this window were successfully written; safe to advance
             latest_time = max(
                 datetime.fromisoformat(r["time"].replace("Z", "+00:00"))
-                for r in records[:successful]
+                for r in records
             )
-            self._sync_state.update_success(latest_time, successful)
-
-        if failed > 0:
-            self._sync_state.update_error(f"Failed to sync {failed} records")
+            if self._sync_state:
+                self._sync_state.update_success(latest_time, successful)
 
         logger.info(
             "Cloud sync completed: %d successful, %d failed",
@@ -623,16 +682,16 @@ from(bucket: "{self._influxdb_bucket}")
                     )
                     break  # Success, exit retry loop
 
-                except Exception as e:
+                except Exception:
                     logger.warning(
-                        "Batch push failed (attempt %d/%d): %s",
+                        "Batch push failed (attempt %d/%d)",
                         retry + 1,
                         self.config.max_retries,
-                        e,
+                        exc_info=True,
                     )
                     if retry == self.config.max_retries - 1:
                         failed += len(batch)
-                        logger.error(
+                        logger.exception(
                             "Failed to push batch of %d records after %d retries",
                             len(batch),
                             self.config.max_retries,
@@ -646,26 +705,25 @@ from(bucket: "{self._influxdb_bucket}")
         """Get current sync status.
 
         Returns:
-            Dictionary containing sync state and health information
+            Dictionary containing sync state and health information.
+            Always includes sync_state key for consistent API contract.
         """
-        status = {
+        return {
             "enabled": self.config.enabled,
             "connected": self.is_connected(),
             "health": self.health_check() if self.is_connected() else {},
+            "sync_state": (
+                self._sync_state.get_status() if self._sync_state else None
+            ),
         }
-
-        if self._sync_state:
-            status["sync_state"] = self._sync_state.get_status()
-
-        return status
 
     def close(self) -> None:
         """Close all connections."""
         if self._influx_client:
             try:
                 self._influx_client.close()
-            except Exception as e:
-                logger.debug("Error closing InfluxDB client: %s", e)
+            except Exception:
+                logger.debug("Error closing InfluxDB client", exc_info=True)
             self._influx_client = None
 
         self._supabase_client = None
