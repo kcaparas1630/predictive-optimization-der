@@ -4,7 +4,6 @@ DER Data Generator - Main module for simulating realistic DER data.
 Supports continuous generation and scheduled execution.
 """
 
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -21,6 +20,16 @@ from edge_gateway.simulators import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Optional InfluxDB storage import
+try:
+    from edge_gateway.storage import InfluxDBStorage, InfluxDBConfig
+
+    INFLUXDB_AVAILABLE = True
+except ImportError:
+    INFLUXDB_AVAILABLE = False
+    InfluxDBStorage = None  # type: ignore
+    InfluxDBConfig = None  # type: ignore
 
 
 class DERDataGenerator:
@@ -165,6 +174,12 @@ class DERDataGenerator:
 class DataGeneratorRunner:
     """
     Runner for continuous or scheduled data generation.
+
+    Supports multiple output destinations:
+    - Logging (always enabled)
+    - File output (JSONL format)
+    - Callback functions
+    - InfluxDB local storage (optional)
     """
 
     def __init__(
@@ -172,6 +187,7 @@ class DataGeneratorRunner:
         generator: DERDataGenerator,
         output_callback: Optional[Callable[[DERData], None]] = None,
         output_file: Optional[Path] = None,
+        influxdb_config: Optional["InfluxDBConfig"] = None,
     ) -> None:
         """
         Initialize the runner.
@@ -180,11 +196,26 @@ class DataGeneratorRunner:
             generator: The DER data generator
             output_callback: Optional callback function for each data point
             output_file: Optional file path to append JSON data
+            influxdb_config: Optional InfluxDB configuration for local storage
         """
         self.generator = generator
         self.output_callback = output_callback
         self.output_file = output_file
         self._running = False
+        self._influxdb_storage: Optional["InfluxDBStorage"] = None
+
+        # Initialize InfluxDB storage if configured
+        if influxdb_config is not None and influxdb_config.enabled:
+            if not INFLUXDB_AVAILABLE:
+                logger.warning(
+                    "InfluxDB storage requested but influxdb-client not installed"
+                )
+            else:
+                try:
+                    self._influxdb_storage = InfluxDBStorage(influxdb_config)
+                    logger.info("InfluxDB storage initialized")
+                except Exception as e:
+                    logger.error("Failed to initialize InfluxDB storage: %s", e)
 
     def _output_data(self, data: DERData) -> None:
         """Output data to configured destinations."""
@@ -196,6 +227,11 @@ class DataGeneratorRunner:
             data.home_load.total_load_kw,
             data.net_grid_flow_kw,
         )
+
+        # InfluxDB storage (write to local TSDB first)
+        if self._influxdb_storage is not None:
+            if not self._influxdb_storage.write(data):
+                logger.warning("Failed to write to InfluxDB")
 
         # Callback
         if self.output_callback:
@@ -305,5 +341,16 @@ class DataGeneratorRunner:
             self._running = False
 
     def stop(self) -> None:
-        """Stop the runner."""
+        """Stop the runner and clean up resources."""
         self._running = False
+        if self._influxdb_storage is not None:
+            self._influxdb_storage.close()
+            self._influxdb_storage = None
+
+    def __enter__(self) -> "DataGeneratorRunner":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.stop()

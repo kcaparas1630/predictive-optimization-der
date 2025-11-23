@@ -1,0 +1,34 @@
+# Docker Compose for Edge Gateway Local TSDB
+# This sets up InfluxDB 2.x for local time series data storage
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: edge-gateway-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    environment:
+      # Initial setup configuration
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword123
+      - DOCKER_INFLUXDB_INIT_ORG=edge-gateway
+      - DOCKER_INFLUXDB_INIT_BUCKET=der-data
+      - DOCKER_INFLUXDB_INIT_RETENTION=168h  # 7 days retention
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=edge-gateway-dev-token
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  influxdb-data:
+    name: edge-gateway-influxdb-data
+  influxdb-config:
+    name: edge-gateway-influxdb-config

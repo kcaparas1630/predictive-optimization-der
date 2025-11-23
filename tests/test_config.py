@@ -11,6 +11,7 @@ from edge_gateway.config import (
     BatteryConfig,
     HomeLoadConfig,
     GridPriceConfig,
+    InfluxDBConfig,
     DEFAULT_CONFIG,
 )
 
@@ -72,6 +73,7 @@ class TestGeneratorConfig:
         assert isinstance(config.battery, BatteryConfig)
         assert isinstance(config.home_load, HomeLoadConfig)
         assert isinstance(config.grid_price, GridPriceConfig)
+        assert isinstance(config.influxdb, InfluxDBConfig)
 
     def test_to_dict(self):
         """Test config serializes to dictionary."""
@@ -83,6 +85,7 @@ class TestGeneratorConfig:
         assert "battery" in d
         assert "home_load" in d
         assert "grid_price" in d
+        assert "influxdb" in d
 
     def test_from_dict(self):
         """Test config can be created from dictionary."""

@@ -1,9 +1,14 @@
 # DER Data Simulator Dependencies
-# No external dependencies required - uses only Python standard library
+# Core package uses only Python standard library
+
+# Local TSDB (InfluxDB) - Required for edge gateway local storage
+influxdb-client>=1.40.0
+
+# Cloud Database - Optional for cloud sync
+supabase==2.24.0
+python-dotenv==1.2.1
+websockets==13.0
 
 # Development dependencies (optional)
 # pytest>=7.0.0
 # pytest-cov>=4.0.0
-supabase==2.24.0
-python-dotenv==1.2.1
-websockets==13.0

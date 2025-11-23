@@ -3,7 +3,6 @@
 import json
 from datetime import datetime, timezone
 
-import pytest
 
 from edge_gateway.models import (
     DERData,
