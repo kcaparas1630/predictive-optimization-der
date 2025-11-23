@@ -228,7 +228,7 @@ class ModelTrainingRunner:
 def setup_signal_handlers(runner: ModelTrainingRunner) -> None:
     """Setup signal handlers for graceful shutdown."""
 
-    def handle_signal(signum, frame):
+    def handle_signal(signum: int, _frame) -> None:
         logger.info("Received shutdown signal")
         runner._shutdown_requested = True
 
@@ -366,7 +366,7 @@ Examples:
         # Output results
         if args.json:
             # Convert any non-serializable values
-            def serialize(obj):
+            def serialize(obj: Any) -> Any:
                 if isinstance(obj, Path):
                     return str(obj)
                 if isinstance(obj, datetime):
@@ -390,7 +390,7 @@ Examples:
         logger.error("Missing dependency: %s", e)
         return 1
     except Exception as e:
-        logger.exception("Unexpected error: %s", e)
+        logger.exception("Unexpected error")
         return 1
     finally:
         if "runner" in locals():

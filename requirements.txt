@@ -14,8 +14,8 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # Machine Learning - Required for forecasting models
-scikit-learn>=1.3.0
-joblib>=1.3.0
+scikit-learn=1.7.2
+joblib=1.5.2
 
 # Development dependencies (optional)
 # pytest>=7.0.0

@@ -369,7 +369,7 @@ class TestBaselineForecaster:
         forecaster = BaselineForecaster(disabled_config)
         forecaster.prepare_features(sample_training_data)
 
-        with pytest.raises(ValueError, match="Target column.*not found"):
+        with pytest.raises(ValueError, match=r"Target column.*not found"):
             forecaster.create_target_variable(
                 sample_training_data, "nonexistent_column"
             )

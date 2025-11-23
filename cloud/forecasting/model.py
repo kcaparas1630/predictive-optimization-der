@@ -402,9 +402,73 @@ class BaselineForecaster:
             meets_target=meets_target,
         )
 
-    def train_load_model(
-        self, df: pd.DataFrame
+    def _train_model(
+        self,
+        df: pd.DataFrame,
+        target_col: str,
+        model_attr: str,
+        metrics_attr: str,
     ) -> dict[str, Any]:
+        """Generic model training method.
+
+        Args:
+            df: Prepared training data
+            target_col: Name of the target column
+            model_attr: Name of the model attribute to set (e.g., "_load_model")
+            metrics_attr: Name of the metrics attribute to set (e.g., "_load_metrics")
+
+        Returns:
+            Dictionary with training results including metrics
+        """
+        logger.info("Training %s forecasting model", target_col)
+
+        # Create target variable
+        X, y = self.create_target_variable(df, target_col)
+
+        if len(X) < 100:
+            raise ValueError(
+                f"Insufficient data for training: {len(X)} samples (need at least 100)"
+            )
+
+        # Train/test split (time-based, not random for time series)
+        split_idx = int(len(X) * (1 - self.config.test_size))
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+
+        logger.info(
+            "Split data: %d train, %d test (%.1f%%)",
+            len(X_train),
+            len(X_test),
+            self.config.test_size * 100,
+        )
+
+        # Create and train model
+        model = self._create_model()
+        model.fit(X_train, y_train)
+        setattr(self, model_attr, model)
+
+        # Evaluate
+        metrics = self._evaluate_model(model, X_test, y_test)
+        setattr(self, metrics_attr, metrics)
+
+        logger.info(
+            "%s model trained - MAE: %.4f (%.2f%%), R2: %.4f, Target met: %s",
+            target_col,
+            metrics.mae,
+            metrics.mae_percent,
+            metrics.r2,
+            metrics.meets_target,
+        )
+
+        return {
+            "target": target_col,
+            "train_samples": len(X_train),
+            "test_samples": len(X_test),
+            "metrics": metrics.to_dict(),
+            "feature_importance": self._get_feature_importance(model),
+        }
+
+    def train_load_model(self, df: pd.DataFrame) -> dict[str, Any]:
         """Train the load forecasting model.
 
         Args:
@@ -413,56 +477,11 @@ class BaselineForecaster:
         Returns:
             Dictionary with training results including metrics
         """
-        logger.info("Training load forecasting model")
-
-        target_col = self.config.TARGET_LOAD
-
-        # Create target variable
-        X, y = self.create_target_variable(df, target_col)
-
-        if len(X) < 100:
-            raise ValueError(
-                f"Insufficient data for training: {len(X)} samples (need at least 100)"
-            )
-
-        # Train/test split (time-based, not random for time series)
-        split_idx = int(len(X) * (1 - self.config.test_size))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-        logger.info(
-            "Split data: %d train, %d test (%.1f%%)",
-            len(X_train),
-            len(X_test),
-            self.config.test_size * 100,
+        return self._train_model(
+            df, self.config.TARGET_LOAD, "_load_model", "_load_metrics"
         )
 
-        # Create and train model
-        self._load_model = self._create_model()
-        self._load_model.fit(X_train, y_train)
-
-        # Evaluate
-        self._load_metrics = self._evaluate_model(self._load_model, X_test, y_test)
-
-        logger.info(
-            "Load model trained - MAE: %.4f (%.2f%%), R2: %.4f, Target met: %s",
-            self._load_metrics.mae,
-            self._load_metrics.mae_percent,
-            self._load_metrics.r2,
-            self._load_metrics.meets_target,
-        )
-
-        return {
-            "target": target_col,
-            "train_samples": len(X_train),
-            "test_samples": len(X_test),
-            "metrics": self._load_metrics.to_dict(),
-            "feature_importance": self._get_feature_importance(self._load_model),
-        }
-
-    def train_solar_model(
-        self, df: pd.DataFrame
-    ) -> dict[str, Any]:
+    def train_solar_model(self, df: pd.DataFrame) -> dict[str, Any]:
         """Train the solar generation forecasting model.
 
         Args:
@@ -471,52 +490,9 @@ class BaselineForecaster:
         Returns:
             Dictionary with training results including metrics
         """
-        logger.info("Training solar generation forecasting model")
-
-        target_col = self.config.TARGET_SOLAR
-
-        # Create target variable
-        X, y = self.create_target_variable(df, target_col)
-
-        if len(X) < 100:
-            raise ValueError(
-                f"Insufficient data for training: {len(X)} samples (need at least 100)"
-            )
-
-        # Train/test split (time-based, not random for time series)
-        split_idx = int(len(X) * (1 - self.config.test_size))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-        logger.info(
-            "Split data: %d train, %d test (%.1f%%)",
-            len(X_train),
-            len(X_test),
-            self.config.test_size * 100,
+        return self._train_model(
+            df, self.config.TARGET_SOLAR, "_solar_model", "_solar_metrics"
         )
-
-        # Create and train model
-        self._solar_model = self._create_model()
-        self._solar_model.fit(X_train, y_train)
-
-        # Evaluate
-        self._solar_metrics = self._evaluate_model(self._solar_model, X_test, y_test)
-
-        logger.info(
-            "Solar model trained - MAE: %.4f (%.2f%%), R2: %.4f, Target met: %s",
-            self._solar_metrics.mae,
-            self._solar_metrics.mae_percent,
-            self._solar_metrics.r2,
-            self._solar_metrics.meets_target,
-        )
-
-        return {
-            "target": target_col,
-            "train_samples": len(X_train),
-            "test_samples": len(X_test),
-            "metrics": self._solar_metrics.to_dict(),
-            "feature_importance": self._get_feature_importance(self._solar_model),
-        }
 
     def _get_feature_importance(
         self, model: GradientBoostingRegressor
@@ -529,7 +505,7 @@ class BaselineForecaster:
         Returns:
             Dictionary mapping feature names to importance scores
         """
-        importance = dict(zip(self._feature_names, model.feature_importances_))
+        importance = dict(zip(self._feature_names, model.feature_importances_, strict=True))
         # Sort by importance descending
         return dict(sorted(importance.items(), key=lambda x: x[1], reverse=True))
 
@@ -680,7 +656,7 @@ class BaselineForecaster:
                 loaded["load"] = True
                 logger.info("Loaded load model from %s", load_path)
             except Exception as e:
-                logger.error("Failed to load load model: %s", e)
+                logger.exception("Failed to load load model: %s", e)
                 loaded["load"] = False
         else:
             loaded["load"] = False
@@ -697,7 +673,7 @@ class BaselineForecaster:
                 loaded["solar"] = True
                 logger.info("Loaded solar model from %s", solar_path)
             except Exception as e:
-                logger.error("Failed to load solar model: %s", e)
+                logger.exception("Failed to load solar model: %s", e)
                 loaded["solar"] = False
         else:
             loaded["solar"] = False
