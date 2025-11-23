@@ -1,3 +1,9 @@
+# DER Data Simulator Dependencies
+# No external dependencies required - uses only Python standard library
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
 supabase==2.24.0
 python-dotenv==1.2.1
 websockets==13.0
