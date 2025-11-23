@@ -5,6 +5,7 @@ and stores the results in a training-ready table.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar, Optional
 
@@ -155,28 +156,53 @@ class FeatureEngineeringPipeline:
         )
 
         try:
-            # Build query
-            query = self._supabase_client.table(self.config.source_table).select("*")
+            # Paginate through results (Supabase/PostgREST has 1000-row default limit)
+            all_data = []
+            page_size = 1000
+            offset = 0
 
-            # Add time range filter
-            query = query.gte("time", start_time.isoformat())
-            query = query.lte("time", end_time.isoformat())
+            while True:
+                # Build query
+                query = self._supabase_client.table(self.config.source_table).select(
+                    "*"
+                )
 
-            # Add site filter if specified
-            if self.config.site_id:
-                query = query.eq("site_id", self.config.site_id)
+                # Add time range filter
+                query = query.gte("time", start_time.isoformat())
+                query = query.lte("time", end_time.isoformat())
 
-            # Order by time for proper processing
-            query = query.order("time")
+                # Add site filter if specified
+                if self.config.site_id:
+                    query = query.eq("site_id", self.config.site_id)
 
-            # Execute query
-            result = query.execute()
+                # Order by time for proper processing
+                query = query.order("time")
 
-            if not result.data:
+                # Paginate
+                query = query.range(offset, offset + page_size - 1)
+
+                # Execute query
+                result = query.execute()
+
+                if not result.data:
+                    break
+
+                all_data.extend(result.data)
+                logger.debug(
+                    "Fetched %d records (total: %d)", len(result.data), len(all_data)
+                )
+
+                # If we got less than page_size, we're done
+                if len(result.data) < page_size:
+                    break
+
+                offset += page_size
+
+            if not all_data:
                 logger.info("No data found in specified time range")
                 return pd.DataFrame()
 
-            df = pd.DataFrame(result.data)
+            df = pd.DataFrame(all_data)
             logger.info("Queried %d raw records", len(df))
             return df
 
@@ -313,22 +339,40 @@ class FeatureEngineeringPipeline:
 
         # Calculate rolling features for each key metric
         window_days = self.config.rolling_window_days
-        # Assuming 5-minute intervals, calculate window size
-        # 12 samples/hour * 24 hours * window_days
-        expected_interval_minutes = 5
-        samples_per_hour = 60 // expected_interval_minutes
-        window_size = samples_per_hour * 24 * window_days
 
-        # Validate actual data interval if we have enough data
+        # Calculate window size based on actual data interval
+        # Use median of time differences for robustness against gaps/outliers
+        expected_interval_minutes = 5
+        actual_interval_minutes = expected_interval_minutes
+
         if len(df) > 1 and "time" in df.columns:
-            time_diff = (df["time"].iloc[1] - df["time"].iloc[0]).total_seconds() / 60
-            if abs(time_diff - expected_interval_minutes) > 0.1:
+            time_diffs = df["time"].diff().dropna()
+            if len(time_diffs) > 0:
+                # Use median for robustness against outliers/gaps
+                median_diff = time_diffs.median().total_seconds() / 60
+                actual_interval_minutes = median_diff
+
+            if abs(actual_interval_minutes - expected_interval_minutes) > 0.1:
                 logger.warning(
-                    "Data interval (%.1fmin) differs from expected (%dmin). "
-                    "Rolling window calculations may be incorrect.",
-                    time_diff,
+                    "Data interval (%.1fmin median) differs from expected (%dmin). "
+                    "Adjusting rolling window to use actual interval.",
+                    actual_interval_minutes,
                     expected_interval_minutes,
                 )
+
+        # Calculate samples per day based on actual interval
+        if actual_interval_minutes > 0:
+            samples_per_day = round((24 * 60) / actual_interval_minutes)
+        else:
+            samples_per_day = 288  # fallback to 5-min intervals
+
+        window_size = max(1, samples_per_day * window_days)
+        logger.debug(
+            "Rolling window: %d samples (%d days at %.1f min intervals)",
+            window_size,
+            window_days,
+            actual_interval_minutes,
+        )
 
         features_added = 0
         for metric in self.config.ROLLING_AVG_METRICS:
@@ -431,13 +475,14 @@ class FeatureEngineeringPipeline:
         df = df.sort_values("time")
 
         # Calculate samples per hour from actual data interval
+        # Use median of time differences for robustness against gaps/outliers
         samples_per_hour = 12  # default for 5-min intervals
         if len(df) > 1 and "time" in df.columns:
-            time_diff_minutes = (
-                df["time"].iloc[1] - df["time"].iloc[0]
-            ).total_seconds() / 60
-            if time_diff_minutes > 0:
-                samples_per_hour = round(60 / time_diff_minutes)
+            time_diffs = df["time"].diff().dropna()
+            if len(time_diffs) > 0:
+                median_diff_minutes = time_diffs.median().total_seconds() / 60
+                if median_diff_minutes > 0:
+                    samples_per_hour = round(60 / median_diff_minutes)
 
         features_added = 0
         for metric in self.LAG_METRICS:
@@ -480,15 +525,46 @@ class FeatureEngineeringPipeline:
         # Handle NaN values and datetime serialization
         df = df.copy()
 
+        # Validate required columns for upsert are present
+        required_columns = ("time", "site_id", "device_id")
+        missing_required = [col for col in required_columns if col not in df.columns]
+        if missing_required:
+            logger.error(
+                "Cannot store training data, missing required columns: %s",
+                missing_required,
+            )
+            return 0
+
+        # Filter to only expected columns (data may have extra columns from pivot)
+        expected_columns = self.get_feature_columns()
+        available_columns = [col for col in expected_columns if col in df.columns]
+        extra_columns = [col for col in df.columns if col not in expected_columns]
+        if extra_columns:
+            logger.debug(
+                "Dropping %d extra columns not in schema: %s",
+                len(extra_columns),
+                extra_columns[:5],  # Log first 5
+            )
+        df = df[available_columns]
+
         # Convert time to ISO string
         if "time" in df.columns:
             df["time"] = df["time"].dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
-        # Replace NaN with None for JSON serialization
-        df = df.where(pd.notna(df), None)
-
-        # Convert to records
+        # Convert to records and replace NaN/None values
+        # (df.where doesn't properly convert NaN to None for JSON)
         records = df.to_dict(orient="records")
+
+        # Clean NaN/Inf values from records (JSON doesn't support NaN/Inf)
+        # Use try-except to handle both Python float and NumPy scalar types
+        for record in records:
+            for key, value in record.items():
+                try:
+                    if value is not None and (math.isnan(value) or math.isinf(value)):
+                        record[key] = None
+                except TypeError:
+                    # Value is not a numeric type, skip
+                    continue
 
         # Store in batches
         stored = 0
