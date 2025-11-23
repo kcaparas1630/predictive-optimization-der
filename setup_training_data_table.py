@@ -163,11 +163,17 @@ load_dotenv()
 # Import Supabase client
 try:
     from supabase import create_client, Client
+    from postgrest.exceptions import APIError as PostgrestAPIError
 
     SUPABASE_AVAILABLE = True
 except ImportError:
     SUPABASE_AVAILABLE = False
+    PostgrestAPIError = Exception  # type: ignore
     print("Warning: supabase not installed. Run: pip install supabase")
+
+
+# PostgreSQL error code for "relation does not exist"
+POSTGRES_UNDEFINED_TABLE = "42P01"
 
 
 def get_client() -> "Client":
@@ -184,26 +190,35 @@ def get_client() -> "Client":
 
 
 def test_connection() -> bool:
-    """Test the Supabase connection."""
+    """Test the Supabase connection.
+
+    Returns:
+        True if connection successful and table exists, False if table missing.
+
+    Raises:
+        ValueError: If SUPABASE_URL or SUPABASE_KEY not configured.
+        PostgrestAPIError: For unexpected API errors (auth, network, etc.).
+    """
+    client = get_client()  # Let ValueError propagate for misconfiguration
+
     try:
-        client = get_client()
         result = client.table("training_data").select("*").limit(1).execute()
         print("Supabase connection successful!")
         print(f"  training_data table accessible: {result.data is not None}")
         if result.data:
             print(f"  Sample data exists: {len(result.data)} record(s)")
         return True
-    except Exception as e:
-        if "relation" in str(e) and "does not exist" in str(e):
+    except PostgrestAPIError as e:
+        # Check for "relation does not exist" using structured error code
+        if getattr(e, "code", None) == POSTGRES_UNDEFINED_TABLE:
             print("Supabase connection successful!")
             print(
                 "  training_data table not yet created - "
                 "run SQL commands in Supabase SQL Editor"
             )
             return False
-        else:
-            print(f"Connection error: {e}")
-            return False
+        # Re-raise unexpected API errors (auth issues, network errors, etc.)
+        raise
 
 
 def insert_test_record() -> bool:
@@ -234,39 +249,41 @@ def insert_test_record() -> bool:
 
 
 def get_table_stats() -> dict:
-    """Get statistics about the training_data table."""
-    try:
-        client = get_client()
+    """Get statistics about the training_data table.
 
-        # Count total records
-        result = client.table("training_data").select("*", count="exact").execute()
+    Returns:
+        Dictionary with table statistics.
 
-        # Get time range
-        earliest = (
-            client.table("training_data")
-            .select("time")
-            .order("time", desc=False)
-            .limit(1)
-            .execute()
-        )
-        latest = (
-            client.table("training_data")
-            .select("time")
-            .order("time", desc=True)
-            .limit(1)
-            .execute()
-        )
+    Raises:
+        ValueError: If SUPABASE_URL or SUPABASE_KEY not configured.
+        PostgrestAPIError: For API errors (table missing, auth issues, etc.).
+    """
+    client = get_client()  # Let ValueError propagate for misconfiguration
 
-        stats = {
-            "total_records": result.count if result.count else 0,
-            "earliest_time": earliest.data[0]["time"] if earliest.data else None,
-            "latest_time": latest.data[0]["time"] if latest.data else None,
-        }
+    # Count total records
+    result = client.table("training_data").select("*", count="exact").execute()
 
-        return stats
-    except Exception as e:
-        print(f"Error getting stats: {e}")
-        return {}
+    # Get time range
+    earliest = (
+        client.table("training_data")
+        .select("time")
+        .order("time", desc=False)
+        .limit(1)
+        .execute()
+    )
+    latest = (
+        client.table("training_data")
+        .select("time")
+        .order("time", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    return {
+        "total_records": result.count if result.count else 0,
+        "earliest_time": earliest.data[0]["time"] if earliest.data else None,
+        "latest_time": latest.data[0]["time"] if latest.data else None,
+    }
 
 
 if __name__ == "__main__":

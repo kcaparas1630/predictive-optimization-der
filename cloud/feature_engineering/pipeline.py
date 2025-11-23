@@ -174,7 +174,7 @@ class FeatureEngineeringPipeline:
             return df
 
         except Exception as e:
-            logger.error("Failed to query raw data: %s", e)
+            logger.exception("Failed to query raw data: %s", e)
             raise
 
     def pivot_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -298,7 +298,20 @@ class FeatureEngineeringPipeline:
         window_days = self.config.rolling_window_days
         # Assuming 5-minute intervals, calculate window size
         # 12 samples/hour * 24 hours * window_days
-        window_size = 12 * 24 * window_days
+        expected_interval_minutes = 5
+        samples_per_hour = 60 // expected_interval_minutes
+        window_size = samples_per_hour * 24 * window_days
+
+        # Validate actual data interval if we have enough data
+        if len(df) > 1 and "time" in df.columns:
+            time_diff = (df["time"].iloc[1] - df["time"].iloc[0]).total_seconds() / 60
+            if abs(time_diff - expected_interval_minutes) > 0.1:
+                logger.warning(
+                    "Data interval (%.1fmin) differs from expected (%dmin). "
+                    "Rolling window calculations may be incorrect.",
+                    time_diff,
+                    expected_interval_minutes,
+                )
 
         features_added = 0
         for metric in self.config.ROLLING_AVG_METRICS:
@@ -309,14 +322,18 @@ class FeatureEngineeringPipeline:
                 logger.debug("Metric %s not found in data, skipping", metric)
                 continue
 
-            # Rolling mean
+            # Rolling mean (use min_periods=window_size to avoid data leakage)
             avg_col = f"{col_name}_rolling_avg_{window_days}d"
-            df[avg_col] = df[metric].rolling(window=window_size, min_periods=1).mean()
+            df[avg_col] = df[metric].rolling(
+                window=window_size, min_periods=window_size
+            ).mean()
             features_added += 1
 
             # Rolling standard deviation
             std_col = f"{col_name}_rolling_std_{window_days}d"
-            df[std_col] = df[metric].rolling(window=window_size, min_periods=1).std()
+            df[std_col] = df[metric].rolling(
+                window=window_size, min_periods=window_size
+            ).std()
             features_added += 1
 
         logger.info("Added %d rolling features", features_added)
@@ -465,7 +482,7 @@ class FeatureEngineeringPipeline:
                 stored += len(batch)
                 logger.debug("Stored batch of %d records", len(batch))
             except Exception as e:
-                logger.error("Failed to store batch: %s", e)
+                logger.exception("Failed to store batch: %s", e)
                 raise
 
         logger.info("Successfully stored %d records", stored)
@@ -529,6 +546,17 @@ class FeatureEngineeringPipeline:
 
             # Step 4: Calculate rolling features
             df = self.calculate_rolling_features(df)
+
+            # Drop rows with incomplete rolling features (NaN from min_periods)
+            rolling_cols = [col for col in df.columns if "rolling" in col]
+            if rolling_cols:
+                rows_before = len(df)
+                df = df.dropna(subset=rolling_cols)
+                rows_dropped = rows_before - len(df)
+                if rows_dropped > 0:
+                    logger.info(
+                        "Dropped %d rows with incomplete rolling features", rows_dropped
+                    )
 
             # Step 5: Encode categorical features
             df = self.encode_categorical_features(df)

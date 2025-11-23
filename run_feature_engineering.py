@@ -81,7 +81,7 @@ class FeatureEngineeringRunner:
         self._running = False
         self._interval_seconds = interval_seconds
         self._cycles_completed = 0
-        self._total_records_processed = 0
+        self._total_records_stored = 0
 
         # Import here to avoid circular imports and handle missing dependencies
         try:
@@ -160,12 +160,12 @@ class FeatureEngineeringRunner:
 
                 if result["status"] == "success":
                     self._cycles_completed += 1
-                    self._total_records_processed += result.get("records_stored", 0)
+                    self._total_records_stored += result.get("records_stored", 0)
                     logger.info(
-                        "Cycle %d completed: %d records (total: %d)",
+                        "Cycle %d completed: %d records stored (total: %d)",
                         self._cycles_completed,
                         result.get("records_stored", 0),
-                        self._total_records_processed,
+                        self._total_records_stored,
                     )
                 elif result["status"] == "no_data":
                     logger.debug("No new data to process")
@@ -186,9 +186,9 @@ class FeatureEngineeringRunner:
                     time.sleep(sleep_time)
 
         logger.info(
-            "Feature engineering stopped. Total cycles: %d, records: %d",
+            "Feature engineering stopped. Total cycles: %d, records stored: %d",
             self._cycles_completed,
-            self._total_records_processed,
+            self._total_records_stored,
         )
 
     def _setup_signal_handlers(self) -> None:
@@ -219,7 +219,7 @@ class FeatureEngineeringRunner:
             "connected": self._pipeline.is_connected(),
             "health": health,
             "cycles_completed": self._cycles_completed,
-            "total_records_processed": self._total_records_processed,
+            "total_records_stored": self._total_records_stored,
             "config": {
                 "site_id": self._config.site_id or "(all sites)",
                 "batch_size": self._config.batch_size,
