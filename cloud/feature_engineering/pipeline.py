@@ -6,7 +6,7 @@ and stores the results in a training-ready table.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 import pandas as pd
 
@@ -47,7 +47,7 @@ class FeatureEngineeringPipeline:
     """
 
     # Key metrics for lag features
-    LAG_METRICS = [
+    LAG_METRICS: ClassVar[list[str]] = [
         "solar.generation_kw",
         "home_load.total_load_kw",
         "grid_price.price_per_kwh",
@@ -437,7 +437,7 @@ class FeatureEngineeringPipeline:
                 df["time"].iloc[1] - df["time"].iloc[0]
             ).total_seconds() / 60
             if time_diff_minutes > 0:
-                samples_per_hour = int(round(60 / time_diff_minutes))
+                samples_per_hour = round(60 / time_diff_minutes)
 
         features_added = 0
         for metric in self.LAG_METRICS:

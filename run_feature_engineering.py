@@ -34,6 +34,7 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
+from types import FrameType
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -89,8 +90,8 @@ class FeatureEngineeringRunner:
                 FeatureEngineeringConfig,
                 FeatureEngineeringPipeline,
             )
-        except ImportError as e:
-            logger.error("Failed to import feature engineering module: %s", e)
+        except ImportError:
+            logger.exception("Failed to import feature engineering module")
             raise
 
         # Create configuration
@@ -223,7 +224,7 @@ class FeatureEngineeringRunner:
     def _setup_signal_handlers(self) -> None:
         """Set up signal handlers for graceful shutdown."""
 
-        def signal_handler(signum, frame):
+        def signal_handler(signum: int, _frame: Optional[FrameType]) -> None:
             logger.info("Received signal %d, stopping...", signum)
             self._running = False
 
