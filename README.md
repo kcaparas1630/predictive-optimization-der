@@ -40,6 +40,46 @@ python run_simulator.py --historical --start 2024-06-15 --end 2024-06-16 --outpu
 
 # Generate a sample configuration file
 python run_simulator.py --generate-config --config config.json
+
+# Enable InfluxDB storage (requires running InfluxDB instance)
+python run_simulator.py --continuous --enable-influxdb --influxdb-token mytoken
+
+# Or use environment variables for InfluxDB configuration
+export INFLUXDB_URL=http://localhost:8086
+export INFLUXDB_TOKEN=mytoken
+export INFLUXDB_ORG=edge-gateway
+export INFLUXDB_BUCKET=der-data
+python run_simulator.py --continuous --enable-influxdb
+```
+
+### InfluxDB Storage
+
+The simulator supports writing data to a local InfluxDB instance for time series storage.
+
+**Requirements:**
+- InfluxDB 2.x running locally (default: `http://localhost:8086`)
+- An authentication token with write permissions
+- Install the optional dependency: `pip install influxdb-client`
+
+**CLI Options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--enable-influxdb` | Enable InfluxDB storage | disabled |
+| `--influxdb-url` | InfluxDB server URL | `http://localhost:8086` |
+| `--influxdb-token` | Authentication token | (required) |
+| `--influxdb-org` | Organization name | `edge-gateway` |
+| `--influxdb-bucket` | Bucket name | `der-data` |
+| `--influxdb-retention-days` | Data retention period | 7 |
+
+**Environment Variables:**
+- `INFLUXDB_URL` - Server URL
+- `INFLUXDB_TOKEN` - Authentication token
+- `INFLUXDB_ORG` - Organization name
+- `INFLUXDB_BUCKET` - Bucket name
+
+**Docker Setup:**
+```bash
+docker-compose up -d influxdb
 ```
 
 ### Configuration

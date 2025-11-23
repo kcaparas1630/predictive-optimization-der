@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from edge_gateway.storage import InfluxDBConfig
+
 
 @dataclass
 class SolarConfig:
@@ -65,6 +67,7 @@ class GeneratorConfig:
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     home_load: HomeLoadConfig = field(default_factory=HomeLoadConfig)
     grid_price: GridPriceConfig = field(default_factory=GridPriceConfig)
+    influxdb: InfluxDBConfig = field(default_factory=InfluxDBConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "GeneratorConfig":
@@ -79,6 +82,7 @@ class GeneratorConfig:
                 battery=BatteryConfig(**data.get("battery", {})),
                 home_load=HomeLoadConfig(**data.get("home_load", {})),
                 grid_price=GridPriceConfig(**data.get("grid_price", {})),
+                influxdb=InfluxDBConfig(**data.get("influxdb", {})),
             )
         except TypeError as e:
             raise ValueError(f"Invalid configuration format: {e}") from e

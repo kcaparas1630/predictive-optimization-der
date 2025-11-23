@@ -6,7 +6,9 @@ This package provides realistic simulation of:
 - Battery State of Charge (SoC)
 - Home load consumption
 - Grid price signals
+
+Supports local time series database storage via InfluxDB.
 """
 
 __all__ = ["__version__"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

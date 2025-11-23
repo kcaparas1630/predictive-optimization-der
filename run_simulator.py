@@ -7,6 +7,8 @@ Simulates realistic hourly DER data including:
 - Home Load
 - Grid Price signals
 
+Supports writing to local InfluxDB time series database.
+
 Usage:
     # Run once
     python run_simulator.py --once
@@ -22,10 +24,16 @@ Usage:
 
     # Use custom config file
     python run_simulator.py --config config.json --continuous
+
+    # Enable InfluxDB storage
+    python run_simulator.py --continuous --influxdb-url http://localhost:8086 --influxdb-token mytoken
+
+    # Or set environment variables:
+    # INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG, INFLUXDB_BUCKET
+    python run_simulator.py --continuous --enable-influxdb
 """
 
 import argparse
-import json
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
@@ -71,12 +79,13 @@ def run_once(config: GeneratorConfig) -> None:
     generator = create_generator_from_config(config)
     output_file = Path(config.output_file) if config.output_file else None
 
-    runner = DataGeneratorRunner(
+    with DataGeneratorRunner(
         generator=generator,
         output_callback=print_data,
         output_file=output_file,
-    )
-    runner.run_once()
+        influxdb_config=config.influxdb if config.influxdb.enabled else None,
+    ) as runner:
+        runner.run_once()
 
 
 def run_continuous(config: GeneratorConfig, duration: int | None = None) -> None:
@@ -84,15 +93,16 @@ def run_continuous(config: GeneratorConfig, duration: int | None = None) -> None
     generator = create_generator_from_config(config)
     output_file = Path(config.output_file) if config.output_file else None
 
-    runner = DataGeneratorRunner(
+    with DataGeneratorRunner(
         generator=generator,
         output_callback=print_data,
         output_file=output_file,
-    )
-    runner.run_continuous(
-        interval_seconds=config.interval_seconds,
-        duration_seconds=duration,
-    )
+        influxdb_config=config.influxdb if config.influxdb.enabled else None,
+    ) as runner:
+        runner.run_continuous(
+            interval_seconds=config.interval_seconds,
+            duration_seconds=duration,
+        )
 
 
 def run_scheduled(config: GeneratorConfig) -> None:
@@ -100,15 +110,16 @@ def run_scheduled(config: GeneratorConfig) -> None:
     generator = create_generator_from_config(config)
     output_file = Path(config.output_file) if config.output_file else None
 
-    runner = DataGeneratorRunner(
+    with DataGeneratorRunner(
         generator=generator,
         output_callback=print_data,
         output_file=output_file,
-    )
-    runner.run_scheduled(
-        interval_seconds=config.interval_seconds,
-        align_to_interval=True,
-    )
+        influxdb_config=config.influxdb if config.influxdb.enabled else None,
+    ) as runner:
+        runner.run_scheduled(
+            interval_seconds=config.interval_seconds,
+            align_to_interval=True,
+        )
 
 
 def generate_historical(
@@ -222,6 +233,39 @@ def main():
         help="End date for historical data (YYYY-MM-DD is exclusive/ends at midnight, or YYYY-MM-DD HH:MM for exact time)",
     )
 
+    # InfluxDB options
+    influx_group = parser.add_argument_group("InfluxDB Options")
+    influx_group.add_argument(
+        "--enable-influxdb",
+        action="store_true",
+        help="Enable writing to local InfluxDB (uses config or env vars)",
+    )
+    influx_group.add_argument(
+        "--influxdb-url",
+        type=str,
+        help="InfluxDB server URL (default: http://localhost:8086)",
+    )
+    influx_group.add_argument(
+        "--influxdb-token",
+        type=str,
+        help="InfluxDB authentication token (or set INFLUXDB_TOKEN env var)",
+    )
+    influx_group.add_argument(
+        "--influxdb-org",
+        type=str,
+        help="InfluxDB organization (default: edge-gateway)",
+    )
+    influx_group.add_argument(
+        "--influxdb-bucket",
+        type=str,
+        help="InfluxDB bucket name (default: der-data)",
+    )
+    influx_group.add_argument(
+        "--influxdb-retention-days",
+        type=int,
+        help="Data retention period in days (default: 7)",
+    )
+
     # Verbosity
     parser.add_argument(
         "--quiet",
@@ -242,6 +286,12 @@ def main():
     elif args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Handle generate-config mode early (doesn't need existing config)
+    if args.generate_config:
+        output_path = args.config or Path("config.json")
+        generate_sample_config(output_path)
+        return
+
     # Load or create configuration
     if args.config:
         if not args.config.exists():
@@ -261,12 +311,29 @@ def main():
     if args.seed is not None:
         config.seed = args.seed
 
-    # Execute selected mode
-    if args.generate_config:
-        output_path = args.config or Path("config.json")
-        generate_sample_config(output_path)
+    # Apply InfluxDB overrides
+    if args.enable_influxdb:
+        config.influxdb.enabled = True
+    if args.influxdb_url is not None:
+        config.influxdb.url = args.influxdb_url
+    if args.influxdb_token is not None:
+        config.influxdb.token = args.influxdb_token
+    if args.influxdb_org is not None:
+        config.influxdb.org = args.influxdb_org
+    if args.influxdb_bucket is not None:
+        config.influxdb.bucket = args.influxdb_bucket
+    if args.influxdb_retention_days is not None:
+        config.influxdb.retention_days = args.influxdb_retention_days
 
-    elif args.once:
+    # Validate InfluxDB configuration if enabled
+    if config.influxdb.enabled and not config.influxdb.token:
+        parser.error(
+            "InfluxDB token is required when InfluxDB is enabled. "
+            "Use --influxdb-token or set INFLUXDB_TOKEN environment variable."
+        )
+
+    # Execute selected mode
+    if args.once:
         run_once(config)
 
     elif args.continuous:
