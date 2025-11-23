@@ -9,6 +9,10 @@ supabase==2.24.0
 python-dotenv==1.2.1
 websockets==13.0
 
+# Feature Engineering - Required for AI/ML pipeline
+pandas>=2.0.0
+numpy>=1.24.0
+
 # Development dependencies (optional)
 # pytest>=7.0.0
 # pytest-cov>=4.0.0
