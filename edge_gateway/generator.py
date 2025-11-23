@@ -82,21 +82,21 @@ class DERDataGenerator:
             capacity_kwh=battery_capacity_kwh,
             max_charge_rate_kw=battery_max_power_kw,
             max_discharge_rate_kw=battery_max_power_kw,
-            seed=seed + 1 if seed else None,
+            seed=seed + 1 if seed is not None else None,
         )
 
         self.home_load = HomeLoadSimulator(
             base_load_kw=base_load_kw,
             peak_load_kw=peak_load_kw,
             has_ev=has_ev,
-            seed=seed + 2 if seed else None,
+            seed=seed + 2 if seed is not None else None,
         )
 
         self.grid_price = GridPriceSimulator(
             off_peak_price=off_peak_price,
             shoulder_price=shoulder_price,
             peak_price=peak_price,
-            seed=seed + 3 if seed else None,
+            seed=seed + 3 if seed is not None else None,
         )
 
     def generate(self, timestamp: Optional[datetime] = None) -> DERData:
@@ -260,6 +260,7 @@ class DataGeneratorRunner:
     def run_scheduled(
         self,
         interval_seconds: float = 300,
+        *,
         align_to_interval: bool = True,
     ) -> None:
         """

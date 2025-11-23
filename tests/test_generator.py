@@ -93,6 +93,20 @@ class TestDERDataGenerator:
         assert data1.battery.soc_percent == data2.battery.soc_percent
         assert data1.grid_price.price_per_kwh == data2.grid_price.price_per_kwh
 
+    def test_seed_zero_is_deterministic(self):
+        """Test that seed=0 produces deterministic results."""
+        gen1 = DERDataGenerator(seed=0)
+        gen2 = DERDataGenerator(seed=0)
+
+        ts = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        data1 = gen1.generate(ts)
+        data2 = gen2.generate(ts)
+
+        assert data1.solar.generation_kw == data2.solar.generation_kw
+        assert data1.battery.soc_percent == data2.battery.soc_percent
+        assert data1.home_load.total_load_kw == data2.home_load.total_load_kw
+        assert data1.grid_price.price_per_kwh == data2.grid_price.price_per_kwh
+
     def test_net_grid_flow_calculation(self):
         """Test net grid flow is calculated correctly."""
         gen = DERDataGenerator(seed=42)
