@@ -341,17 +341,20 @@ class FeatureEngineeringPipeline:
         window_days = self.config.rolling_window_days
 
         # Calculate window size based on actual data interval
+        # Use median of time differences for robustness against gaps/outliers
         expected_interval_minutes = 5
         actual_interval_minutes = expected_interval_minutes
 
         if len(df) > 1 and "time" in df.columns:
-            actual_interval_minutes = (
-                df["time"].iloc[1] - df["time"].iloc[0]
-            ).total_seconds() / 60
+            time_diffs = df["time"].diff().dropna()
+            if len(time_diffs) > 0:
+                # Use median for robustness against outliers/gaps
+                median_diff = time_diffs.median().total_seconds() / 60
+                actual_interval_minutes = median_diff
 
             if abs(actual_interval_minutes - expected_interval_minutes) > 0.1:
                 logger.warning(
-                    "Data interval (%.1fmin) differs from expected (%dmin). "
+                    "Data interval (%.1fmin median) differs from expected (%dmin). "
                     "Adjusting rolling window to use actual interval.",
                     actual_interval_minutes,
                     expected_interval_minutes,
@@ -472,13 +475,14 @@ class FeatureEngineeringPipeline:
         df = df.sort_values("time")
 
         # Calculate samples per hour from actual data interval
+        # Use median of time differences for robustness against gaps/outliers
         samples_per_hour = 12  # default for 5-min intervals
         if len(df) > 1 and "time" in df.columns:
-            time_diff_minutes = (
-                df["time"].iloc[1] - df["time"].iloc[0]
-            ).total_seconds() / 60
-            if time_diff_minutes > 0:
-                samples_per_hour = round(60 / time_diff_minutes)
+            time_diffs = df["time"].diff().dropna()
+            if len(time_diffs) > 0:
+                median_diff_minutes = time_diffs.median().total_seconds() / 60
+                if median_diff_minutes > 0:
+                    samples_per_hour = round(60 / median_diff_minutes)
 
         features_added = 0
         for metric in self.LAG_METRICS:
@@ -521,6 +525,16 @@ class FeatureEngineeringPipeline:
         # Handle NaN values and datetime serialization
         df = df.copy()
 
+        # Validate required columns for upsert are present
+        required_columns = ("time", "site_id", "device_id")
+        missing_required = [col for col in required_columns if col not in df.columns]
+        if missing_required:
+            logger.error(
+                "Cannot store training data, missing required columns: %s",
+                missing_required,
+            )
+            return 0
+
         # Filter to only expected columns (data may have extra columns from pivot)
         expected_columns = self.get_feature_columns()
         available_columns = [col for col in expected_columns if col in df.columns]
@@ -541,11 +555,16 @@ class FeatureEngineeringPipeline:
         # (df.where doesn't properly convert NaN to None for JSON)
         records = df.to_dict(orient="records")
 
-        # Clean NaN values from records (JSON doesn't support NaN)
+        # Clean NaN/Inf values from records (JSON doesn't support NaN/Inf)
+        # Use try-except to handle both Python float and NumPy scalar types
         for record in records:
             for key, value in record.items():
-                if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-                    record[key] = None
+                try:
+                    if value is not None and (math.isnan(value) or math.isinf(value)):
+                        record[key] = None
+                except TypeError:
+                    # Value is not a numeric type, skip
+                    continue
 
         # Store in batches
         stored = 0
