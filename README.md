@@ -173,6 +173,123 @@ Data is output as JSON with the following structure:
 pytest tests/ -v
 ```
 
+## Cloud Sync
+
+Syncs data from local InfluxDB to Supabase cloud database.
+
+### Commands
+
+```bash
+# Run sync once
+python run_cloud_sync.py --once
+
+# Run continuous sync (default interval: 60s)
+python run_cloud_sync.py --continuous
+
+# Run with custom interval
+python run_cloud_sync.py --continuous --interval 120
+
+# Show sync status
+python run_cloud_sync.py --status
+
+# With InfluxDB token
+python run_cloud_sync.py --continuous --influxdb-token edge-gateway-dev-token
+```
+
+### Environment Variables
+
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase API key
+- `INFLUXDB_URL` - InfluxDB server URL
+- `INFLUXDB_TOKEN` - InfluxDB authentication token
+- `INFLUXDB_ORG` - InfluxDB organization
+- `INFLUXDB_BUCKET` - InfluxDB bucket name
+- `SYNC_BATCH_SIZE` - Records per sync batch
+- `SYNC_INTERVAL_SECONDS` - Sync interval in seconds
+
+## Feature Engineering
+
+Processes raw DER data into ML-ready training features.
+
+### Commands
+
+```bash
+# Run once with default settings
+python run_feature_engineering.py --once
+
+# Run with custom lookback period
+python run_feature_engineering.py --once --lookback-days 60
+
+# Run in continuous mode (default interval: 1 hour)
+python run_feature_engineering.py --continuous
+
+# Run with custom interval
+python run_feature_engineering.py --continuous --interval 3600
+
+# Show status
+python run_feature_engineering.py --status
+```
+
+### Environment Variables
+
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase API key
+- `FE_SITE_ID` - Site identifier to filter data
+- `FE_BATCH_SIZE` - Records per batch (default: 1000)
+- `FE_ROLLING_WINDOW_DAYS` - Rolling window days (default: 7)
+- `FE_LOOKBACK_DAYS` - Historical data lookback (default: 30)
+
+## Model Training
+
+Trains baseline forecasting models for load and solar prediction.
+
+### Commands
+
+```bash
+# Train models with default settings
+python run_model_training.py --train
+
+# Train with custom model directory
+python run_model_training.py --train --model-dir ./trained_models
+
+# Evaluate existing models
+python run_model_training.py --evaluate
+
+# Show model status
+python run_model_training.py --status
+```
+
+### Environment Variables
+
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase API key
+- `FORECAST_MODEL_DIR` - Directory to save trained models
+- `FORECAST_TEST_SIZE` - Fraction of data for testing (0.0-1.0)
+
+## Full Pipeline Example
+
+Run the complete pipeline with InfluxDB token `edge-gateway-dev-token`:
+
+```bash
+# Terminal 1: Start InfluxDB
+docker-compose up -d influxdb
+
+# Terminal 2: Run simulator (generates data every 10 seconds)
+python run_simulator.py --continuous --interval 10 --enable-influxdb --influxdb-token edge-gateway-dev-token
+
+# Terminal 3: Run cloud sync (syncs to Supabase every 60 seconds)
+python run_cloud_sync.py --continuous --interval 60
+
+# Terminal 4: Run feature engineering (processes data every hour)
+python run_feature_engineering.py --continuous --interval 3600
+
+# Or run feature engineering once after accumulating data
+python run_feature_engineering.py --once --lookback-days 7
+
+# Train models after feature engineering completes
+python run_model_training.py --train
+```
+
 ### Project Structure
 
 ```text
@@ -190,12 +307,18 @@ edge_gateway/
     battery.py       # Battery state simulator
     home_load.py     # Home load simulator
     grid_price.py    # Grid price simulator
+cloud/
+  feature_engineering/  # Feature engineering pipeline
+  forecasting/          # ML forecasting models
 tests/
   __init__.py
   test_config.py
   test_generator.py
   test_models.py
   test_simulators.py
-run_simulator.py     # CLI entry point
-pyproject.toml       # Project configuration
+run_simulator.py           # Simulator CLI
+run_cloud_sync.py          # Cloud sync CLI
+run_feature_engineering.py # Feature engineering CLI
+run_model_training.py      # Model training CLI
+pyproject.toml             # Project configuration
 ```

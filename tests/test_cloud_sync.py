@@ -1,5 +1,6 @@
 """Tests for cloud sync module."""
 
+import json
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -729,7 +730,11 @@ class TestCloudSync:
         mock_supabase.table.return_value = mock_table
         mock_supabase_create.return_value = mock_supabase
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", delete=False, mode="w"
+        ) as f:
+            # Write valid initial state to avoid warning from empty file
+            json.dump({}, f)
             state_file = f.name
 
         try:
@@ -790,7 +795,11 @@ class TestCloudSync:
         mock_supabase.table.return_value = mock_table
         mock_supabase_create.return_value = mock_supabase
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", delete=False, mode="w"
+        ) as f:
+            # Write valid initial state to avoid warning from empty file
+            json.dump({}, f)
             state_file = f.name
 
         try:

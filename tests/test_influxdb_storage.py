@@ -80,11 +80,12 @@ class TestInfluxDBConfig:
         """Test env vars override defaults but not explicit values."""
         monkeypatch.setenv("INFLUXDB_URL", "http://env-host:9999")
 
-        # Explicit value should be overridden by env var due to __post_init__
+        # Explicit value should NOT be overridden by env var
+        # Precedence: explicit args > env vars > defaults
         config = InfluxDBConfig(url="http://explicit:8086")
 
-        # Note: With current implementation, env var takes precedence
-        assert config.url == "http://env-host:9999"
+        # Explicit value takes precedence over env var
+        assert config.url == "http://explicit:8086"
 
 
 @pytest.fixture

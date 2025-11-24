@@ -19,7 +19,12 @@ class TestForecastingConfig:
 
     def test_default_values(self):
         """Test default configuration values."""
-        with patch.dict(os.environ, {}, clear=True):
+        # Clear all env vars that could affect config
+        with patch.dict(
+            os.environ,
+            {"SUPABASE_URL": "", "SUPABASE_KEY": "", "FORECAST_HORIZON_HOURS": ""},
+            clear=True,
+        ):
             config = ForecastingConfig()
 
             assert config.supabase_url == ""
@@ -72,6 +77,7 @@ class TestForecastingConfig:
             "FORECAST_HORIZON_HOURS": "48",
         }
 
+        # Use clear=True and ensure no leftover env vars
         with patch.dict(os.environ, env_vars, clear=True):
             config = ForecastingConfig()
 
@@ -115,15 +121,17 @@ class TestForecastingConfig:
 
     def test_validate_missing_url(self):
         """Test validation fails when URL is missing."""
-        config = ForecastingConfig(supabase_key="key")
-        with pytest.raises(ValueError, match="Supabase URL is required"):
-            config.validate()
+        with patch.dict(os.environ, {"SUPABASE_URL": "", "SUPABASE_KEY": ""}, clear=True):
+            config = ForecastingConfig(supabase_key="key")
+            with pytest.raises(ValueError, match="Supabase URL is required"):
+                config.validate()
 
     def test_validate_missing_key(self):
         """Test validation fails when key is missing."""
-        config = ForecastingConfig(supabase_url="https://test.supabase.co")
-        with pytest.raises(ValueError, match="Supabase key is required"):
-            config.validate()
+        with patch.dict(os.environ, {"SUPABASE_URL": "", "SUPABASE_KEY": ""}, clear=True):
+            config = ForecastingConfig(supabase_url="https://test.supabase.co")
+            with pytest.raises(ValueError, match="Supabase key is required"):
+                config.validate()
 
     def test_validate_invalid_test_size(self):
         """Test validation fails for invalid test_size."""
