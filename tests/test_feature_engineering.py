@@ -376,7 +376,7 @@ class TestFeatureEngineeringPipeline:
 
         # Check lag features exist
         assert "solar_generation_kw_lag_1" in result.columns
-        assert "solar_generation_kw_lag_12" in result.columns
+        assert "solar_generation_kw_lag_1h" in result.columns
 
     def test_get_feature_columns_returns_expected_list(self, disabled_config):
         """Test that get_feature_columns returns expected features."""
@@ -405,7 +405,7 @@ class TestFeatureEngineeringPipeline:
 
         # Check lag features
         assert "solar_generation_kw_lag_1" in features
-        assert "solar_generation_kw_lag_12" in features
+        assert "solar_generation_kw_lag_1h" in features
 
     def test_context_manager_closes_connection(self, disabled_config):
         """Test that context manager properly closes connection."""
