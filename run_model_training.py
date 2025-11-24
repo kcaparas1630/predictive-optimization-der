@@ -31,13 +31,14 @@ import signal
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import FrameType
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from cloud.forecasting import BaselineForecaster, ForecastingConfig  # noqa: E402
+from cloud.forecasting import BaselineForecaster, ForecastingConfig
 
 # Configure logging
 logging.basicConfig(
@@ -228,9 +229,11 @@ class ModelTrainingRunner:
 def setup_signal_handlers(runner: ModelTrainingRunner) -> None:
     """Setup signal handlers for graceful shutdown."""
 
-    def handle_signal(signum: int, _frame) -> None:
-        logger.info("Received shutdown signal")
+    def handle_signal(_signum: int, _frame: Optional[FrameType]) -> None:
+        logger.info("Received shutdown signal; requesting shutdown")
         runner._shutdown_requested = True
+        # Recreate default Ctrl+C semantics so long runs can be interrupted.
+        raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -383,13 +386,16 @@ Examples:
         else:
             return 1
 
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user; shutting down.")
+        return 130
     except ValueError as e:
         logger.error("Configuration error: %s", e)
         return 1
     except ImportError as e:
         logger.error("Missing dependency: %s", e)
         return 1
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error")
         return 1
     finally:

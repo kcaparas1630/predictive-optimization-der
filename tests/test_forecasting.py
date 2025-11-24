@@ -673,3 +673,227 @@ class TestModelTrainingRunner:
         assert status["connected"] is True
         assert "config" in status
         assert "models" in status
+
+
+class TestCLIMain:
+    """Tests for the CLI main() entry point."""
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_train_success_returns_zero(self, mock_runner_class, monkeypatch):
+        """Test --train with success status returns exit code 0."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        mock_runner = MagicMock()
+        mock_runner.train.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        exit_code = main()
+
+        assert exit_code == 0
+        mock_runner.train.assert_called_once()
+        mock_runner.close.assert_called_once()
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_evaluate_success_returns_zero(self, mock_runner_class, monkeypatch):
+        """Test --evaluate with success status returns exit code 0."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--evaluate"])
+
+        mock_runner = MagicMock()
+        mock_runner.evaluate.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        exit_code = main()
+
+        assert exit_code == 0
+        mock_runner.evaluate.assert_called_once()
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_status_success_returns_zero(self, mock_runner_class, monkeypatch):
+        """Test --status with success status returns exit code 0."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--status"])
+
+        mock_runner = MagicMock()
+        mock_runner.get_status.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        exit_code = main()
+
+        assert exit_code == 0
+        mock_runner.get_status.assert_called_once()
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_no_models_returns_zero(self, mock_runner_class, monkeypatch):
+        """Test that 'no_models' status returns exit code 0 (not an error)."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--evaluate"])
+
+        mock_runner = MagicMock()
+        mock_runner.evaluate.return_value = {"status": "no_models"}
+        mock_runner_class.return_value = mock_runner
+
+        exit_code = main()
+
+        assert exit_code == 0
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_failure_status_returns_one(self, mock_runner_class, monkeypatch):
+        """Test that failure status returns exit code 1."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        mock_runner = MagicMock()
+        mock_runner.train.return_value = {"status": "error"}
+        mock_runner_class.return_value = mock_runner
+
+        exit_code = main()
+
+        assert exit_code == 1
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_json_output(self, mock_runner_class, monkeypatch, capsys):
+        """Test --json outputs valid JSON."""
+        import json
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--status", "--json"])
+
+        mock_runner = MagicMock()
+        mock_runner.get_status.return_value = {
+            "status": "success",
+            "connected": True,
+            "config": {"model_dir": "models"},
+        }
+        mock_runner_class.return_value = mock_runner
+
+        main()
+
+        captured = capsys.readouterr()
+        # Verify output is valid JSON
+        parsed = json.loads(captured.out)
+        assert parsed["status"] == "success"
+        assert parsed["connected"] is True
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_verbose_sets_debug_logging(self, mock_runner_class, monkeypatch):
+        """Test --verbose sets logging level to DEBUG."""
+        import logging
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--status", "--verbose"])
+
+        mock_runner = MagicMock()
+        mock_runner.get_status.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        main()
+
+        assert logging.getLogger().level == logging.DEBUG
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_custom_model_dir(self, mock_runner_class, monkeypatch):
+        """Test --model-dir argument is passed to runner."""
+        from run_model_training import main
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run_model_training.py", "--status", "--model-dir", "custom_models"],
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.get_status.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        main()
+
+        mock_runner_class.assert_called_once()
+        call_kwargs = mock_runner_class.call_args[1]
+        assert call_kwargs["model_dir"] == "custom_models"
+
+    @patch("run_model_training.ModelTrainingRunner")
+    def test_main_hyperparameters(self, mock_runner_class, monkeypatch):
+        """Test hyperparameter arguments are passed to runner."""
+        from run_model_training import main
+
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "run_model_training.py",
+                "--train",
+                "--n-estimators", "200",
+                "--max-depth", "8",
+                "--learning-rate", "0.05",
+                "--test-size", "0.3",
+            ],
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.train.return_value = {"status": "success"}
+        mock_runner_class.return_value = mock_runner
+
+        main()
+
+        call_kwargs = mock_runner_class.call_args[1]
+        assert call_kwargs["n_estimators"] == 200
+        assert call_kwargs["max_depth"] == 8
+        assert call_kwargs["learning_rate"] == 0.05
+        assert call_kwargs["test_size"] == 0.3
+
+    def test_main_value_error_returns_one(self, monkeypatch):
+        """Test ValueError returns exit code 1."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        with patch("run_model_training.ModelTrainingRunner") as mock_runner_class:
+            mock_runner_class.side_effect = ValueError("Invalid config")
+
+            exit_code = main()
+
+            assert exit_code == 1
+
+    def test_main_import_error_returns_one(self, monkeypatch):
+        """Test ImportError returns exit code 1."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        with patch("run_model_training.ModelTrainingRunner") as mock_runner_class:
+            mock_runner_class.side_effect = ImportError("Missing module")
+
+            exit_code = main()
+
+            assert exit_code == 1
+
+    def test_main_keyboard_interrupt_returns_130(self, monkeypatch):
+        """Test KeyboardInterrupt returns exit code 130."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        with patch("run_model_training.ModelTrainingRunner") as mock_runner_class:
+            mock_runner_class.side_effect = KeyboardInterrupt()
+
+            exit_code = main()
+
+            assert exit_code == 130
+
+    def test_main_unexpected_error_returns_one(self, monkeypatch):
+        """Test unexpected exceptions return exit code 1."""
+        from run_model_training import main
+
+        monkeypatch.setattr("sys.argv", ["run_model_training.py", "--train"])
+
+        with patch("run_model_training.ModelTrainingRunner") as mock_runner_class:
+            mock_runner_class.side_effect = RuntimeError("Unexpected")
+
+            exit_code = main()
+
+            assert exit_code == 1
