@@ -47,10 +47,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from cloud.deep_learning import DeepLearningConfig, DeepLearningForecaster  # noqa: E402
-from cloud.deep_learning.model import compare_with_baseline  # noqa: E402
-from cloud.forecasting import BaselineForecaster, ForecastingConfig  # noqa: E402
-from cloud.forecasting.model import ModelMetrics  # noqa: E402
+from cloud.deep_learning import DeepLearningConfig, DeepLearningForecaster
+from cloud.deep_learning.model import compare_with_baseline
+from cloud.forecasting import BaselineForecaster, ForecastingConfig
+from cloud.forecasting.model import ModelMetrics
 
 # Configure logging
 logging.basicConfig(
@@ -118,7 +118,6 @@ class DeepLearningTrainingRunner:
             early_stopping_patience=early_stopping_patience,
         )
         self.forecaster = DeepLearningForecaster(self.config)
-        self._shutdown_requested = False
 
     def train(self) -> dict[str, Any]:
         """Train both load and solar forecasting models.
@@ -139,9 +138,20 @@ class DeepLearningTrainingRunner:
             saved = self.forecaster.save_models()
             result["saved_models"] = saved
 
+            # Validate result structure before accessing nested keys
+            load_result = result.get("load")
+            solar_result = result.get("solar")
+
+            if not load_result or "metrics" not in load_result:
+                logger.error("Missing load metrics in training result")
+                return result
+            if not solar_result or "metrics" not in solar_result:
+                logger.error("Missing solar metrics in training result")
+                return result
+
             # Log summary
-            load_metrics = result["load"]["metrics"]
-            solar_metrics = result["solar"]["metrics"]
+            load_metrics = load_result["metrics"]
+            solar_metrics = solar_result["metrics"]
 
             logger.info("=" * 60)
             logger.info("DEEP LEARNING MODEL TRAINING SUMMARY")
@@ -156,8 +166,11 @@ class DeepLearningTrainingRunner:
             logger.info("  - Target (MAE <= %.1f%%): %s",
                        self.config.target_mae_percent,
                        "PASS" if load_metrics["meets_target"] else "FAIL")
-            logger.info("  - Epochs trained: %d", result["load"]["training_history"]["total_epochs"])
-            logger.info("  - Parameters: %d", result["load"]["parameters"])
+            load_history = load_result.get("training_history", {})
+            if "total_epochs" in load_history:
+                logger.info("  - Epochs trained: %d", load_history["total_epochs"])
+            if "parameters" in load_result:
+                logger.info("  - Parameters: %d", load_result["parameters"])
             logger.info("")
             logger.info("Solar Forecasting Model:")
             logger.info("  - MAE: %.4f kW (%.2f%%)", solar_metrics["mae"], solar_metrics["mae_percent"])
@@ -166,8 +179,11 @@ class DeepLearningTrainingRunner:
             logger.info("  - Target (MAE <= %.1f%%): %s",
                        self.config.target_mae_percent,
                        "PASS" if solar_metrics["meets_target"] else "FAIL")
-            logger.info("  - Epochs trained: %d", result["solar"]["training_history"]["total_epochs"])
-            logger.info("  - Parameters: %d", result["solar"]["parameters"])
+            solar_history = solar_result.get("training_history", {})
+            if "total_epochs" in solar_history:
+                logger.info("  - Epochs trained: %d", solar_history["total_epochs"])
+            if "parameters" in solar_result:
+                logger.info("  - Parameters: %d", solar_result["parameters"])
             logger.info("")
             logger.info("Models saved to: %s", self.config.model_dir)
             logger.info("=" * 60)
@@ -256,6 +272,12 @@ class DeepLearningTrainingRunner:
             model_dir=self.config.model_dir,
         )
         baseline_forecaster = BaselineForecaster(baseline_config)
+        if not baseline_forecaster.is_connected():
+            logger.warning("Could not connect to database for baseline models")
+            return {
+                "status": "connection_failed",
+                "comparison": None,
+            }
         baseline_loaded = baseline_forecaster.load_models()
         baseline_metrics = baseline_forecaster.get_metrics()
 
@@ -270,15 +292,25 @@ class DeepLearningTrainingRunner:
 
         # Compare load models
         if dl_loaded["load"] and baseline_loaded["load"] and dl_metrics["load"] and baseline_metrics["load"]:
-            dl_load = ModelMetrics(**dl_metrics["load"])
-            baseline_load = ModelMetrics(**baseline_metrics["load"])
-            comparison["load"] = compare_with_baseline(dl_load, baseline_load)
+            try:
+                dl_load = ModelMetrics(**dl_metrics["load"])
+                baseline_load = ModelMetrics(**baseline_metrics["load"])
+                comparison["load"] = compare_with_baseline(
+                    dl_load, baseline_load, self.config.target_mae_percent
+                )
+            except TypeError as e:
+                logger.error("Failed to create ModelMetrics for load comparison: %s", e)
 
         # Compare solar models
         if dl_loaded["solar"] and baseline_loaded["solar"] and dl_metrics["solar"] and baseline_metrics["solar"]:
-            dl_solar = ModelMetrics(**dl_metrics["solar"])
-            baseline_solar = ModelMetrics(**baseline_metrics["solar"])
-            comparison["solar"] = compare_with_baseline(dl_solar, baseline_solar)
+            try:
+                dl_solar = ModelMetrics(**dl_metrics["solar"])
+                baseline_solar = ModelMetrics(**baseline_metrics["solar"])
+                comparison["solar"] = compare_with_baseline(
+                    dl_solar, baseline_solar, self.config.target_mae_percent
+                )
+            except TypeError as e:
+                logger.error("Failed to create ModelMetrics for solar comparison: %s", e)
 
         # Log comparison
         logger.info("=" * 60)
@@ -298,7 +330,7 @@ class DeepLearningTrainingRunner:
             logger.info("    - MAE: %.2f%%", c["improvements"]["mae_percent_improvement"])
             logger.info("    - R2: %.4f", c["improvements"]["r2_absolute_improvement"])
             logger.info("    - DL is better: %s", c["dl_is_better"])
-            logger.info("    - Meets 5%% target: %s", c["meets_5_percent_target"])
+            logger.info("    - Meets target (MAE <= %.1f%%): %s", self.config.target_mae_percent, c["meets_target"])
             logger.info("")
 
         if "solar" in comparison:
@@ -314,7 +346,7 @@ class DeepLearningTrainingRunner:
             logger.info("    - MAE: %.2f%%", c["improvements"]["mae_percent_improvement"])
             logger.info("    - R2: %.4f", c["improvements"]["r2_absolute_improvement"])
             logger.info("    - DL is better: %s", c["dl_is_better"])
-            logger.info("    - Meets 5%% target: %s", c["meets_5_percent_target"])
+            logger.info("    - Meets target (MAE <= %.1f%%): %s", self.config.target_mae_percent, c["meets_target"])
 
         logger.info("=" * 60)
 
@@ -379,7 +411,6 @@ def setup_signal_handlers(runner: DeepLearningTrainingRunner) -> None:
 
     def handle_signal(_signum: int, _frame: Optional[FrameType]) -> None:
         logger.info("Received shutdown signal; requesting shutdown")
-        runner._shutdown_requested = True
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -564,9 +595,6 @@ Examples:
             result = runner.compare_with_baseline()
         elif args.status:
             result = runner.get_status()
-        else:
-            parser.print_help()
-            return 1
 
         # Output results
         if args.json:
@@ -591,10 +619,10 @@ Examples:
         logger.info("Interrupted by user; shutting down.")
         return 130
     except ValueError as e:
-        logger.error("Configuration error: %s", e)
+        logger.exception("Configuration error: %s", e)
         return 1
     except ImportError as e:
-        logger.error("Missing dependency: %s", e)
+        logger.exception("Missing dependency: %s", e)
         return 1
     except Exception:
         logger.exception("Unexpected error")

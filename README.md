@@ -42,7 +42,7 @@ python run_simulator.py --historical --start 2024-06-15 --end 2024-06-16 --outpu
 python run_simulator.py --generate-config --config config.json
 
 # Enable InfluxDB storage (requires running InfluxDB instance)
-python run_simulator.py --continuous --enable-influxdb --influxdb-token mytoken
+python run_simulator.py --continuous --enable-influxdb --influxdb-token edge-gateway-dev-token
 
 # Or use environment variables for InfluxDB configuration
 export INFLUXDB_URL=http://localhost:8086

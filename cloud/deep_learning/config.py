@@ -5,11 +5,23 @@ forecasting models, extending the baseline forecasting configuration.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from cloud.forecasting.config import ForecastingConfig
+
+
+def _get_dataclass_defaults(cls: type) -> dict[str, Any]:
+    """Get default values for all fields in a dataclass hierarchy."""
+    defaults: dict[str, Any] = {}
+    for field in fields(cls):
+        if field.default is not field.default_factory:
+            if field.default is not dataclass:
+                defaults[field.name] = field.default
+        elif field.default_factory is not dataclass:
+            defaults[field.name] = field.default_factory()
+    return defaults
 
 
 @dataclass
@@ -70,7 +82,7 @@ class DeepLearningConfig(ForecastingConfig):
     use_attention: bool = True
     bidirectional: bool = False
 
-    # Target MAE improvement over baseline (5% as per requirements)
+    # Target MAE as percentage of target mean (model meets target if MAE% <= this value)
     target_mae_percent: float = 5.0
 
     # Feature scaling
@@ -79,106 +91,66 @@ class DeepLearningConfig(ForecastingConfig):
     # Model types available
     MODEL_TYPES: ClassVar[list[str]] = ["lstm", "transformer", "hybrid"]
 
+    # Class-level cache for dataclass defaults
+    _defaults: ClassVar[dict[str, Any] | None] = None
+
+    def _get_defaults(self) -> dict[str, Any]:
+        """Get cached dataclass defaults."""
+        if DeepLearningConfig._defaults is None:
+            DeepLearningConfig._defaults = _get_dataclass_defaults(DeepLearningConfig)
+        return DeepLearningConfig._defaults
+
+    def _apply_env_override(
+        self,
+        field_name: str,
+        env_name: str,
+        type_converter: type[int] | type[float],
+    ) -> None:
+        """Apply environment variable override if field is still at default.
+
+        Args:
+            field_name: Name of the field to override
+            env_name: Environment variable name
+            type_converter: Type to convert the value to (int or float)
+        """
+        defaults = self._get_defaults()
+        if field_name not in defaults:
+            return
+        if getattr(self, field_name) != defaults[field_name]:
+            return
+        raw = os.environ.get(env_name)
+        if not raw:
+            return
+        try:
+            setattr(self, field_name, type_converter(raw))
+        except ValueError as e:
+            type_name = "an integer" if type_converter is int else "a float"
+            raise ValueError(f"{env_name} must be {type_name}, got: {raw!r}") from e
+
     def __post_init__(self) -> None:
         """Apply environment variable overrides."""
         # First apply parent class overrides
         super().__post_init__()
 
         # Apply deep learning specific env var overrides
-        if self.model_type == "lstm":
+        defaults = self._get_defaults()
+
+        # Handle model_type specially due to validation requirement
+        if self.model_type == defaults.get("model_type"):
             env_model_type = os.environ.get("DL_MODEL_TYPE")
             if env_model_type and env_model_type in self.MODEL_TYPES:
                 self.model_type = env_model_type  # type: ignore
 
-        if self.sequence_length == 288:
-            env_seq_len = os.environ.get("DL_SEQUENCE_LENGTH")
-            if env_seq_len:
-                try:
-                    self.sequence_length = int(env_seq_len)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_SEQUENCE_LENGTH must be an integer, got: {env_seq_len!r}"
-                    ) from e
-
-        if self.epochs == 100:
-            env_epochs = os.environ.get("DL_EPOCHS")
-            if env_epochs:
-                try:
-                    self.epochs = int(env_epochs)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_EPOCHS must be an integer, got: {env_epochs!r}"
-                    ) from e
-
-        if self.batch_size == 32:
-            env_batch_size = os.environ.get("DL_BATCH_SIZE")
-            if env_batch_size:
-                try:
-                    self.batch_size = int(env_batch_size)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_BATCH_SIZE must be an integer, got: {env_batch_size!r}"
-                    ) from e
-
-        if self.dl_learning_rate == 0.001:
-            env_lr = os.environ.get("DL_LEARNING_RATE")
-            if env_lr:
-                try:
-                    self.dl_learning_rate = float(env_lr)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_LEARNING_RATE must be a float, got: {env_lr!r}"
-                    ) from e
-
-        if self.hidden_units == 64:
-            env_hidden = os.environ.get("DL_HIDDEN_UNITS")
-            if env_hidden:
-                try:
-                    self.hidden_units = int(env_hidden)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_HIDDEN_UNITS must be an integer, got: {env_hidden!r}"
-                    ) from e
-
-        if self.num_layers == 2:
-            env_layers = os.environ.get("DL_NUM_LAYERS")
-            if env_layers:
-                try:
-                    self.num_layers = int(env_layers)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_NUM_LAYERS must be an integer, got: {env_layers!r}"
-                    ) from e
-
-        if self.dropout == 0.2:
-            env_dropout = os.environ.get("DL_DROPOUT")
-            if env_dropout:
-                try:
-                    self.dropout = float(env_dropout)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_DROPOUT must be a float, got: {env_dropout!r}"
-                    ) from e
-
-        if self.early_stopping_patience == 10:
-            env_patience = os.environ.get("DL_EARLY_STOPPING_PATIENCE")
-            if env_patience:
-                try:
-                    self.early_stopping_patience = int(env_patience)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_EARLY_STOPPING_PATIENCE must be an integer, got: {env_patience!r}"
-                    ) from e
-
-        if self.validation_split == 0.15:
-            env_val_split = os.environ.get("DL_VALIDATION_SPLIT")
-            if env_val_split:
-                try:
-                    self.validation_split = float(env_val_split)
-                except ValueError as e:
-                    raise ValueError(
-                        f"DL_VALIDATION_SPLIT must be a float, got: {env_val_split!r}"
-                    ) from e
+        # Apply numeric overrides using helper
+        self._apply_env_override("sequence_length", "DL_SEQUENCE_LENGTH", int)
+        self._apply_env_override("epochs", "DL_EPOCHS", int)
+        self._apply_env_override("batch_size", "DL_BATCH_SIZE", int)
+        self._apply_env_override("dl_learning_rate", "DL_LEARNING_RATE", float)
+        self._apply_env_override("hidden_units", "DL_HIDDEN_UNITS", int)
+        self._apply_env_override("num_layers", "DL_NUM_LAYERS", int)
+        self._apply_env_override("dropout", "DL_DROPOUT", float)
+        self._apply_env_override("early_stopping_patience", "DL_EARLY_STOPPING_PATIENCE", int)
+        self._apply_env_override("validation_split", "DL_VALIDATION_SPLIT", float)
 
     def validate(self) -> None:
         """Validate configuration values.

@@ -1,8 +1,8 @@
 """Deep Learning forecasting models for DER prediction.
 
-This module provides LSTM and Transformer-based models for predicting
-load (kW) and solar generation (kW) 24 hours ahead, aiming to improve
-upon the baseline Gradient Boosting model.
+This module provides LSTM, Transformer, and hybrid LSTM+Transformer models
+for predicting load (kW) and solar generation (kW) 24 hours ahead, aiming
+to improve upon the baseline Gradient Boosting model.
 """
 
 from cloud.deep_learning.config import DeepLearningConfig

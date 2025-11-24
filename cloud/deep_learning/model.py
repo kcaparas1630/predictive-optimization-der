@@ -5,6 +5,7 @@ load (kW) and solar generation (kW) 24 hours ahead, with comparison
 against the baseline Gradient Boosting model.
 """
 
+import gc
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -140,10 +141,15 @@ class DeepLearningForecaster:
         self._solar_metrics: Optional[ModelMetrics] = None
         self._load_history: Optional[TrainingHistory] = None
         self._solar_history: Optional[TrainingHistory] = None
-        self._feature_names: list[str] = []
-        self._feature_scaler: Optional[StandardScaler] = None
+        # Per-target feature names and scalers to avoid cross-contamination
+        self._feature_names_load: list[str] = []
+        self._feature_names_solar: list[str] = []
+        self._feature_scaler_load: Optional[StandardScaler] = None
+        self._feature_scaler_solar: Optional[StandardScaler] = None
         self._target_scaler_load: Optional[StandardScaler] = None
         self._target_scaler_solar: Optional[StandardScaler] = None
+        # Temporary storage for features from prepare_features
+        self._available_features: list[str] = []
 
         if not config.enabled:
             logger.info("Deep learning forecasting is disabled")
@@ -275,7 +281,8 @@ class DeepLearningForecaster:
                 sorted(missing_features)[:5],
             )
 
-        self._feature_names = available_features
+        # Store available features temporarily for create_sequences to use
+        self._available_features = available_features
         logger.info("Using %d features for training", len(available_features))
 
         return df
@@ -325,17 +332,34 @@ class DeepLearningForecaster:
             horizon_samples,
         )
 
+        # Determine which target we're training for (load vs solar)
+        is_load_target = "load" in target_col_normalized.lower()
+
+        # Get feature names (from prepare_features) and store per-target
+        feature_names = self._available_features
+        if is_load_target:
+            self._feature_names_load = feature_names
+        else:
+            self._feature_names_solar = feature_names
+
         # Get feature and target data
-        feature_data = df[self._feature_names].values
+        feature_data = df[feature_names].values
         target_data = df[target_col_normalized].values
 
-        # Scale features if configured
+        # Scale features if configured - use per-target scaler
         if self.config.scale_features:
-            if self._feature_scaler is None:
-                self._feature_scaler = StandardScaler()
-                feature_data = self._feature_scaler.fit_transform(feature_data)
+            if is_load_target:
+                if self._feature_scaler_load is None:
+                    self._feature_scaler_load = StandardScaler()
+                    feature_data = self._feature_scaler_load.fit_transform(feature_data)
+                else:
+                    feature_data = self._feature_scaler_load.transform(feature_data)
             else:
-                feature_data = self._feature_scaler.transform(feature_data)
+                if self._feature_scaler_solar is None:
+                    self._feature_scaler_solar = StandardScaler()
+                    feature_data = self._feature_scaler_solar.fit_transform(feature_data)
+                else:
+                    feature_data = self._feature_scaler_solar.transform(feature_data)
 
         # Create sequences
         X_list: list[np.ndarray] = []
@@ -657,12 +681,23 @@ class DeepLearningForecaster:
         setattr(self, model_attr, model)
 
         # Create training history
+        train_losses = history.history.get("loss", [])
+        val_losses = history.history.get("val_loss", [])
+
+        # Compute best_epoch from validation loss (or train loss if no validation)
+        if val_losses:
+            best_epoch_idx = int(np.argmin(val_losses))
+        elif train_losses:
+            best_epoch_idx = int(np.argmin(train_losses))
+        else:
+            best_epoch_idx = 0
+
         train_history = TrainingHistory(
-            train_loss=history.history["loss"],
-            val_loss=history.history["val_loss"],
-            best_epoch=early_stopping.best_epoch if hasattr(early_stopping, "best_epoch") else len(history.history["loss"]),
-            stopped_early=early_stopping.stopped_epoch > 0 if hasattr(early_stopping, "stopped_epoch") else False,
-            total_epochs=len(history.history["loss"]),
+            train_loss=train_losses,
+            val_loss=val_losses,
+            best_epoch=best_epoch_idx + 1,  # 1-based epoch index
+            stopped_early=getattr(early_stopping, "stopped_epoch", 0) > 0,
+            total_epochs=len(train_losses),
         )
         setattr(self, history_attr, train_history)
 
@@ -762,11 +797,8 @@ class DeepLearningForecaster:
             # Prepare features
             df = self.prepare_features(df)
 
-            # Train both models
+            # Train both models (each uses its own per-target scaler)
             load_result = self.train_load_model(df)
-
-            # Reset feature scaler for solar model to use fresh scaling
-            self._feature_scaler = None
             solar_result = self.train_solar_model(df)
 
             elapsed = (datetime.now(timezone.utc) - start).total_seconds()
@@ -776,7 +808,7 @@ class DeepLearningForecaster:
                 "load": load_result,
                 "solar": solar_result,
                 "elapsed_seconds": elapsed,
-                "features_used": len(self._feature_names),
+                "features_used": len(self._feature_names_load),
                 "model_type": self.config.model_type,
             }
 
@@ -821,12 +853,12 @@ class DeepLearningForecaster:
             self._load_model.save(keras_path)
             saved["load_keras"] = str(keras_path)
 
-            # Save metadata with scalers
+            # Save metadata with scalers (per-target)
             joblib_path = self.config.get_model_path("load")
             joblib.dump(
                 {
-                    "features": self._feature_names,
-                    "feature_scaler": self._feature_scaler,
+                    "features": self._feature_names_load,
+                    "feature_scaler": self._feature_scaler_load,
                     "metrics": self._load_metrics.to_dict() if self._load_metrics else None,
                     "history": self._load_history.to_dict() if self._load_history else None,
                     "config": {
@@ -848,11 +880,12 @@ class DeepLearningForecaster:
             self._solar_model.save(keras_path)
             saved["solar_keras"] = str(keras_path)
 
+            # Save metadata with scalers (per-target)
             joblib_path = self.config.get_model_path("solar")
             joblib.dump(
                 {
-                    "features": self._feature_names,
-                    "feature_scaler": self._feature_scaler,
+                    "features": self._feature_names_solar,
+                    "feature_scaler": self._feature_scaler_solar,
                     "metrics": self._solar_metrics.to_dict() if self._solar_metrics else None,
                     "history": self._solar_history.to_dict() if self._solar_history else None,
                     "config": {
@@ -889,8 +922,8 @@ class DeepLearningForecaster:
             try:
                 self._load_model = keras.models.load_model(keras_path)
                 data = joblib.load(joblib_path)
-                self._feature_names = data["features"]
-                self._feature_scaler = data.get("feature_scaler")
+                self._feature_names_load = data["features"]
+                self._feature_scaler_load = data.get("feature_scaler")
                 if data.get("metrics"):
                     self._load_metrics = ModelMetrics(**data["metrics"])
                 if data.get("history"):
@@ -911,8 +944,8 @@ class DeepLearningForecaster:
             try:
                 self._solar_model = keras.models.load_model(keras_path)
                 data = joblib.load(joblib_path)
-                self._feature_names = data["features"]
-                self._feature_scaler = data.get("feature_scaler")
+                self._feature_names_solar = data["features"]
+                self._feature_scaler_solar = data.get("feature_scaler")
                 if data.get("metrics"):
                     self._solar_metrics = ModelMetrics(**data["metrics"])
                 if data.get("history"):
@@ -939,7 +972,12 @@ class DeepLearningForecaster:
         if self._load_model is None:
             raise ValueError("Load model not trained or loaded")
 
-        return self._predict(self._load_model, features)
+        return self._predict(
+            self._load_model,
+            features,
+            self._feature_names_load,
+            self._feature_scaler_load,
+        )
 
     def predict_solar(self, features: pd.DataFrame) -> np.ndarray:
         """Predict solar generation 24 hours ahead.
@@ -953,14 +991,27 @@ class DeepLearningForecaster:
         if self._solar_model is None:
             raise ValueError("Solar model not trained or loaded")
 
-        return self._predict(self._solar_model, features)
+        return self._predict(
+            self._solar_model,
+            features,
+            self._feature_names_solar,
+            self._feature_scaler_solar,
+        )
 
-    def _predict(self, model: Model, features: pd.DataFrame) -> np.ndarray:
+    def _predict(
+        self,
+        model: Model,
+        features: pd.DataFrame,
+        feature_names: list[str],
+        feature_scaler: Optional[StandardScaler],
+    ) -> np.ndarray:
         """Make predictions with a trained model.
 
         Args:
             model: Trained Keras model
             features: DataFrame with feature values
+            feature_names: List of feature column names for this target
+            feature_scaler: Scaler for this target's features (or None)
 
         Returns:
             Array of predicted values
@@ -969,11 +1020,11 @@ class DeepLearningForecaster:
         features.columns = [col.replace(".", "_") for col in features.columns]
 
         # Get feature values
-        X = features[self._feature_names].values
+        X = features[feature_names].values
 
         # Scale if we have a scaler
-        if self._feature_scaler is not None and self.config.scale_features:
-            X = self._feature_scaler.transform(X)
+        if feature_scaler is not None and self.config.scale_features:
+            X = feature_scaler.transform(X)
 
         # Create sequences if needed
         if len(X) >= self.config.sequence_length:
@@ -1016,8 +1067,9 @@ class DeepLearningForecaster:
         """Close Supabase connection and clear models from memory."""
         self._supabase_client = None
         # Clear Keras models to free GPU memory
-        if self._load_model is not None:
+        if self._load_model is not None or self._solar_model is not None:
             keras.backend.clear_session()
+            gc.collect()
         self._load_model = None
         self._solar_model = None
         logger.info("Closed deep learning forecaster connections")
@@ -1034,12 +1086,14 @@ class DeepLearningForecaster:
 def compare_with_baseline(
     dl_metrics: ModelMetrics,
     baseline_metrics: ModelMetrics,
+    target_mae_percent: float = 5.0,
 ) -> dict[str, Any]:
     """Compare deep learning model metrics with baseline.
 
     Args:
         dl_metrics: Metrics from deep learning model
         baseline_metrics: Metrics from baseline model
+        target_mae_percent: Target MAE percentage threshold (default: 5.0)
 
     Returns:
         Dictionary with comparison results
@@ -1065,5 +1119,5 @@ def compare_with_baseline(
             "r2_absolute_improvement": r2_improvement,
         },
         "dl_is_better": mae_improvement > 0 and r2_improvement > 0,
-        "meets_5_percent_target": dl_metrics.mae_percent <= 5.0,
+        "meets_target": dl_metrics.mae_percent <= target_mae_percent,
     }

@@ -672,7 +672,7 @@ class TestCompareWithBaseline:
         result = compare_with_baseline(dl_metrics, baseline_metrics)
 
         assert result["dl_is_better"] is True
-        assert result["meets_5_percent_target"] is True
+        assert result["meets_target"] is True
         assert result["improvements"]["mae_percent_improvement"] > 0
         assert result["improvements"]["r2_absolute_improvement"] > 0
 
@@ -747,7 +747,7 @@ class TestCompareWithBaseline:
         assert "deep_learning" in result
         assert "improvements" in result
         assert "dl_is_better" in result
-        assert "meets_5_percent_target" in result
+        assert "meets_target" in result
 
         assert "mae_percent_improvement" in result["improvements"]
         assert "rmse_percent_improvement" in result["improvements"]
