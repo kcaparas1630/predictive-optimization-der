@@ -164,9 +164,15 @@ class ForecastingConfig:
             ValueError: If required configuration is missing or invalid
         """
         if not self.supabase_url:
-            raise ValueError("Supabase URL is required for forecasting")
+            raise ValueError(
+                "Supabase URL is required for forecasting. "
+                "Set SUPABASE_URL environment variable or pass --supabase-url argument."
+            )
         if not self.supabase_key:
-            raise ValueError("Supabase key is required for forecasting")
+            raise ValueError(
+                "Supabase key is required for forecasting. "
+                "Set SUPABASE_KEY environment variable or pass --supabase-key argument."
+            )
         if not 0.0 < self.test_size < 1.0:
             raise ValueError("test_size must be between 0.0 and 1.0 (exclusive)")
         if self.horizon_hours <= 0:
