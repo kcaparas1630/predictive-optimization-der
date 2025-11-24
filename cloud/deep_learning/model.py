@@ -326,10 +326,23 @@ class DeepLearningForecaster:
 
         horizon_samples = self.config.horizon_hours * samples_per_hour
 
+        # Check if we have enough data
+        min_required = self.config.sequence_length + horizon_samples
+        if len(df) < min_required:
+            raise ValueError(
+                f"Insufficient data: have {len(df)} records, need at least {min_required} "
+                f"(sequence_length={self.config.sequence_length} + "
+                f"horizon={horizon_samples} samples [{self.config.horizon_hours}h × {samples_per_hour} samples/h]). "
+                f"Either reduce --sequence-length, set FORECAST_HORIZON_HOURS to a smaller value, "
+                f"or collect more training data."
+            )
+
         logger.info(
-            "Creating sequences with length %d, horizon %d samples",
+            "Creating sequences with length %d, horizon %d samples (%d hours × %d samples/hour)",
             self.config.sequence_length,
             horizon_samples,
+            self.config.horizon_hours,
+            samples_per_hour,
         )
 
         # Determine which target we're training for (load vs solar)
